@@ -100,7 +100,7 @@
 #include "eal_hugepages.h"
 
 #define PFN_MASK_SIZE	8
-
+#define HUGEPAGE_METADATA_PATH "/tmp/dpdk-memory-metadata"
 #ifdef RTE_LIBRTE_XEN_DOM0
 int rte_xen_dom0_supported(void)
 {
@@ -1173,9 +1173,11 @@ rte_eal_hugepage_init(void)
 
 	uint64_t memory[RTE_MAX_NUMA_NODES];
 
+	int idx=0;
 	unsigned hp_offset;
 	int i, j, new_memseg;
 	int nr_hugefiles, nr_hugepages = 0;
+	FILE * fp=fopen(HUGEPAGE_METADATA_PATH,"w+");
 	void *addr;
 #ifdef RTE_EAL_SINGLE_FILE_SEGMENTS
 	int new_pages_count[MAX_HUGEPAGE_SIZES];
@@ -1321,6 +1323,11 @@ rte_eal_hugepage_init(void)
 		if (unmap_all_hugepages_orig(&tmp_hp[hp_offset], hpi) < 0)
 			goto fail;
 
+		/*record hugepage metadata*/
+		for(idx=0;idx<nr_hugepages;idx++){
+			fprintf(fp,"%s 0x%"PRIx64"\n",tmp_hp[idx].filepath,rte_mem_virt2phy(tmp_hp[idx].final_va));
+		}
+		printf("[x] number of hugepages:%d\n",nr_hugepages);
 		/* we have processed a num of hugepages of this size, so inc offset */
 		hp_offset += hpi->num_pages[0];
 #endif
@@ -1515,10 +1522,11 @@ rte_eal_hugepage_init(void)
 	}
 
 	munmap(hugepage, nr_hugefiles * sizeof(struct hugepage_file));
-
+	fclose(fp);
 	return 0;
 
 fail:
+	fclose(fp);
 	huge_recover_sigbus();
 	free(tmp_hp);
 	if (hugepage != NULL)

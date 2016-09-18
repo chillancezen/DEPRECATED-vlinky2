@@ -37,16 +37,119 @@
 #include <stdarg.h>
 #include <inttypes.h>
 #include <sys/queue.h>
-
+#include <rte_debug.h>
 #include <rte_memory.h>
 #include <rte_memzone.h>
 #include <rte_eal.h>
 #include <rte_eal_memconfig.h>
 #include <rte_log.h>
-
+#include <rte_jhash.h>
 #include "eal_private.h"
 #include "eal_internal_cfg.h"
 
+struct dpdk_physeg_str address_table_base[MEMORY_SEGMENT_TABLE_HASH_SIZE];
+
+
+
+void address_table_init(void)
+{
+	int idx=0;
+	//printf("[x] size of metadata:%d\n",sizeof(struct dpdk_physeg_str));
+	for(;idx<MEMORY_SEGMENT_TABLE_HASH_SIZE;idx++){
+		address_table_base[idx].key=0;
+		address_table_base[idx].value=0;
+	}
+}
+
+int add_key_value(uint64_t key,uint64_t value)
+{
+	uint32_t hash_value;
+	uint32_t hash_index;
+	hash_value=rte_jhash(&key,sizeof(key),RTE_JHASH_GOLDEN_RATIO);
+	hash_value&=(MEMORY_SEGMENT_TABLE_HASH_SIZE-1);
+	hash_index=hash_value;
+	/*printf("[x] %llx -->%llx %d\n",key,value,hash_index);*/
+	do{
+		if(address_table_base[hash_index].key==0){
+			address_table_base[hash_index].key=key;
+			address_table_base[hash_index].value=value;
+			return 0;
+		}
+		hash_index=(hash_index+1)%MEMORY_SEGMENT_TABLE_HASH_SIZE;
+	}while(hash_index!=hash_value);
+	return -1;
+}
+
+uint64_t lookup_key(uint64_t key)
+{
+	uint32_t hash_value;
+	uint32_t hash_index;
+	uint64_t ret=0;
+	hash_value=rte_jhash(&key,sizeof(key),RTE_JHASH_GOLDEN_RATIO);
+	hash_value&=(MEMORY_SEGMENT_TABLE_HASH_SIZE-1);
+	hash_index=hash_value;
+	do{
+		if(address_table_base[hash_index].key==key){
+			ret=address_table_base[hash_index].value;
+			break;
+		}
+		hash_index=(hash_index+1)%MEMORY_SEGMENT_TABLE_HASH_SIZE;
+	}while(hash_index!=hash_value);
+	return ret;
+}
+void verify_virt2phy_translation_tbl(void)
+{
+	const struct rte_mem_config *mcfg;
+	unsigned idx = 0;
+	int inner_idx=0;
+	int nr_pages;
+	uint64_t __attribute__((unused)) phy_address;
+	uint64_t __attribute__((unused)) vir_address;
+	
+	mcfg = rte_eal_get_configuration()->mem_config;
+	for (idx = 0; idx < RTE_MAX_MEMSEG; idx++) {
+		if (mcfg->memseg[idx].addr == NULL)
+			break;
+		nr_pages=mcfg->memseg[idx].len/HUGEPAGE_2M;
+		for(inner_idx=0;inner_idx<nr_pages;inner_idx++){
+			phy_address=mcfg->memseg[idx].phys_addr+(inner_idx*HUGEPAGE_2M);
+			vir_address=mcfg->memseg[idx].addr_64+(inner_idx*HUGEPAGE_2M);
+			RTE_ASSERT(vir_address==lookup_key(vir_address));
+		}
+		
+	}
+}
+void setup_virt2phy_translation_tbl(void)
+{
+	const struct rte_mem_config *mcfg;
+	unsigned idx = 0;
+	int inner_idx=0;
+	int nr_pages;
+	uint64_t phy_address;
+	uint64_t vir_address;
+	
+	mcfg = rte_eal_get_configuration()->mem_config;
+	for (idx = 0; idx < RTE_MAX_MEMSEG; idx++) {
+		if (mcfg->memseg[idx].addr == NULL)
+			break;
+		nr_pages=mcfg->memseg[idx].len/HUGEPAGE_2M;
+		for(inner_idx=0;inner_idx<nr_pages;inner_idx++){
+			phy_address=mcfg->memseg[idx].phys_addr+(inner_idx*HUGEPAGE_2M);
+			vir_address=mcfg->memseg[idx].addr_64+(inner_idx*HUGEPAGE_2M);
+			add_key_value(vir_address,phy_address);
+		}
+	}
+}
+uint64_t translate_virt_address(uint64_t virt_address)
+{
+	uint64_t page_address=virt_address&(~HUGEPAGE_2M_MASK);
+	uint64_t address_offset=virt_address&HUGEPAGE_2M_MASK;
+	uint64_t page_phy_address=lookup_key(page_address);
+	if(!page_phy_address)//loopup failure
+		return 0;
+	
+	return page_phy_address|address_offset;
+}
 /*
  * Return a pointer to a read-only table of struct rte_physmem_desc
  * elements, containing the layout of all addressable physical
@@ -86,14 +189,15 @@ rte_dump_physmem_layout(FILE *f)
 {
 	const struct rte_mem_config *mcfg;
 	unsigned i = 0;
-
+	
 	/* get pointer to global configuration */
 	mcfg = rte_eal_get_configuration()->mem_config;
-
 	for (i = 0; i < RTE_MAX_MEMSEG; i++) {
 		if (mcfg->memseg[i].addr == NULL)
 			break;
-
+		//add_key_value(mcfg->memseg[i].phys_addr,mcfg->memseg[i].addr);
+	/*	printf("hash :0x%x    ",rte_jhash(&mcfg->memseg[i].phys_addr,
+			sizeof(mcfg->memseg[i].phys_addr),RTE_JHASH_GOLDEN_RATIO));*/
 		fprintf(f, "Segment %u: phys:0x%"PRIx64", len:%zu, "
 		       "virt:%p, socket_id:%"PRId32", "
 		       "hugepage_sz:%"PRIu64", nchannel:%"PRIx32", "
@@ -140,15 +244,18 @@ int
 rte_eal_memory_init(void)
 {
 	RTE_LOG(DEBUG, EAL, "Setting up physically contiguous memory...\n");
-
+	address_table_init();
+	
 	const int retval = rte_eal_process_type() == RTE_PROC_PRIMARY ?
 			rte_eal_hugepage_init() :
 			rte_eal_hugepage_attach();
+			
 	if (retval < 0)
 		return -1;
 
 	if (internal_config.no_shconf == 0 && rte_eal_memdevice_init() < 0)
 		return -1;
-
+	setup_virt2phy_translation_tbl();
+	verify_virt2phy_translation_tbl();
 	return 0;
 }

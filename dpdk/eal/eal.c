@@ -170,8 +170,8 @@ rte_eal_config_create(void)
 	void *rte_mem_cfg_addr;
 	int retval;
 
-	const char *pathname = eal_runtime_config_path();
-
+	/*const char *pathname = eal_runtime_config_path();*/
+	const char* pathname="./.rte_dummy_config";
 	if (internal_config.no_shconf)
 		return;
 

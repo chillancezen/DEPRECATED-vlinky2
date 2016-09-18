@@ -54,6 +54,29 @@ extern "C" {
 
 #include <rte_common.h>
 
+struct dpdk_physeg_str{	
+	union{
+		uint64_t key;
+		uint64_t physical_address;
+	};
+	union{
+		uint64_t value;
+		uint64_t virtual_address;
+	};
+};
+int add_key_value(uint64_t key,uint64_t value);
+void address_table_init(void);
+uint64_t lookup_key(uint64_t key);
+void setup_virt2phy_translation_tbl(void);
+void verify_virt2phy_translation_tbl(void);
+uint64_t translate_virt_address(uint64_t virt_address);
+
+
+#define HUGEPAGE_2M (1<<21)
+#define HUGEPAGE_2M_MASK ((1<<21)-1)
+#define MEMORY_SEGMENT_TABLE_HASH_SIZE (1024*8)/*must be power of 2*/
+
+
 enum rte_page_sizes {
 	RTE_PGSIZE_4K    = 1ULL << 12,
 	RTE_PGSIZE_64K   = 1ULL << 16,
