@@ -157,7 +157,7 @@ int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE
 	
 	tlv.type=MESSAGE_TLV_VLINK_COMMON_STATUS_CODE;
 	check_and_goto_tag(message_parse_raw((struct message_header *)(cep->recv_buffer),cep->recv_buffer+sizeof(struct message_header),&tlv,&dummy),fails);
-
+	
 	switch(TO_INT32(dummy))
 	{
 		case VLINK_STATUS_CODE_OK:
@@ -166,7 +166,7 @@ int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE
 			/*strncpy(cep->vm_domain,(char*)dummy,sizeof(cep->vm_domain));*/
 			memcpy(cep->vm_domain,dummy,tlv.length);
 			cep->vm_domain[tlv.length]='\0';
-
+			
 			tlv.type=MESSAGE_TLV_VLINK_COMMON_VLINK_NAME;
 			check_and_goto_tag(message_parse_raw((struct message_header *)(cep->recv_buffer),cep->recv_buffer+sizeof(struct message_header),&tlv,&dummy),fails);
 			/*strncpy(cep->vlink_name,(char*)dummy,sizeof(cep->vlink_name));*/

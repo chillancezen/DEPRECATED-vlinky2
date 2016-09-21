@@ -324,6 +324,71 @@ void message_common_entry(struct tlv_header*tlv,void * value,void * arg)
 	}
 	
 }
+void initialize_virtual_link_channels(struct endpoint * point)
+{
+	void * vm_shm_base;
+	int ctrl_channel_index;
+	int ctrl_channel_offset;
+	struct ctrl_channel *ctrl;
+	void * data_channel_base;
+	void * rx_sub_channel_base;
+	void * free_sub_channel_base;
+	void * alloc_sub_channel_base;
+	void * tx_sub_channel_base;
+	
+	int idx;
+	if(!point->vlink||!point->vlink->domain)
+		return;
+
+	vm_shm_base=PTR(void*,point->vlink->domain->shm_base);
+	if(point->vlink->nr_channels_allocated<2)
+		return;/*at least TWO channels ,one for control channel,others for data channels*/
+	ctrl_channel_index=point->vlink->channels[0];
+	ctrl_channel_offset=channel_base_offset(ctrl_channel_index);
+	
+	ctrl=PTR_OFFSET_BY(struct ctrl_channel*,vm_shm_base,ctrl_channel_offset);
+	ctrl->index_in_vm_domain=ctrl_channel_index;
+	ctrl->offset_to_vm_shm_base=ctrl_channel_offset;
+	ctrl->nr_data_channels=(point->vlink->nr_channels_allocated-1);
+
+	for(idx=0;idx<ctrl->nr_data_channels;idx++){
+		/*1.initialize data channels metadata*/
+		ctrl->channel_records[idx].index_in_m_domain=point->vlink->channels[idx+1];
+		ctrl->channel_records[idx].offset_to_vm_shm_base=channel_base_offset(point->vlink->channels[idx+1]);
+		ctrl->channel_records[idx].data_channel_enabled=0;/*DPDK lane rx-queue setup will enable this*/
+		ctrl->channel_records[idx].rx_address_to_translate=0;
+		ctrl->channel_records[idx].tx_address_to_translate=0;
+		ctrl->channel_records[idx].interrupt_enabled=0;/*qemu lane will enable this*/
+		/*2.initialize every data channel(subchannels)*/
+		
+		data_channel_base=PTR_OFFSET_BY(void*,vm_shm_base,ctrl->channel_records[idx].offset_to_vm_shm_base);
+		rx_sub_channel_base=PTR_OFFSET_BY(void*,data_channel_base,rx_sub_channel_offset());
+		free_sub_channel_base=PTR_OFFSET_BY(void*,data_channel_base,free_sub_channel_offset());
+		alloc_sub_channel_base=PTR_OFFSET_BY(void*,data_channel_base,alloc_sub_channel_offset());
+		tx_sub_channel_base=PTR_OFFSET_BY(void*,data_channel_base,tx_sub_channel_offset());
+		
+		ASSERT(!initialize_queue(rx_sub_channel_base,SUB_CHANNEL_SIZE,DEFAULT_CHANNEL_QUEUE_LENGTH));
+		ASSERT(!initialize_queue(free_sub_channel_base,SUB_CHANNEL_SIZE,DEFAULT_CHANNEL_QUEUE_LENGTH));
+		ASSERT(!initialize_queue(alloc_sub_channel_base,SUB_CHANNEL_SIZE,DEFAULT_CHANNEL_QUEUE_LENGTH));
+		ASSERT(!initialize_queue(tx_sub_channel_base,SUB_CHANNEL_SIZE,DEFAULT_CHANNEL_QUEUE_LENGTH));
+	}
+}
+void change_lane_connection_status(struct endpoint *point,int is_dpdk,int is_connected)
+{
+	void * vm_shm_base;
+	int ctrl_channel_index;
+	int ctrl_channel_offset;
+	struct ctrl_channel *ctrl;
+	if(!point->vlink||!point->vlink->domain)
+		return;
+	vm_shm_base=PTR(void*,point->vlink->domain->shm_base);
+	if(point->vlink->nr_channels_allocated<2)
+		return;
+	ctrl_channel_index=point->vlink->channels[0];
+	ctrl_channel_offset=channel_base_offset(ctrl_channel_index);
+	ctrl=PTR_OFFSET_BY(struct ctrl_channel*,vm_shm_base,ctrl_channel_offset);
+	*(is_dpdk?&ctrl->dpdk_connected:&ctrl->qemu_connected)=is_connected?1:0;
+}
 void message_vlink_request_entry(struct tlv_header * tlv,void * value,void*arg)
 {
 	struct endpoint * point=(struct endpoint *)arg;
@@ -366,6 +431,8 @@ void message_vlink_request_entry(struct tlv_header * tlv,void * value,void*arg)
 							}
 						}
 						point->vlink->fd_dpdk=point->fd_client;
+						initialize_virtual_link_channels(point);/*whenever dpdk lane is connected ,initialize vlink channels*/
+						change_lane_connection_status(point,1,1);
 						break;
 					case VLINK_ROLE_QEMU:
 						{
@@ -375,6 +442,7 @@ void message_vlink_request_entry(struct tlv_header * tlv,void * value,void*arg)
 							}
 						}
 						point->vlink->fd_qemu=point->fd_client;
+						change_lane_connection_status(point,0,1);
 						break;
 					default:
 						/*ASSERT(({!"unknow vlink role found!";}));*/
@@ -504,8 +572,9 @@ void message_vlink_init_entry(struct tlv_header * tlv,void * value,void*arg)
 							temp_point->vlink=NULL;
 						}
 					}
-				
 					point->vlink->fd_dpdk=point->fd_client;
+					initialize_virtual_link_channels(point);/*whenever dpdk lane is connected ,initialize vlink channels*/
+					change_lane_connection_status(point,1,1);
 					break;
 				case VLINK_ROLE_QEMU:
 					{
@@ -515,6 +584,7 @@ void message_vlink_init_entry(struct tlv_header * tlv,void * value,void*arg)
 						}
 					}
 					point->vlink->fd_qemu=point->fd_client;
+					change_lane_connection_status(point,0,1);
 					break;
 				default:
 					/*ASSERT(({!"unknow vlink role found!";}));*/
@@ -587,8 +657,6 @@ void endpoint_message_callback(struct tlv_header*tlv,void * value,void * arg)
 
 void endpoint_alloc_callback(struct endpoint * point)
 {
-	puts("endpoint alloc");
-
 }
 void endpoint_dealloc_callback(struct endpoint* point)
 {
@@ -604,7 +672,8 @@ void endpoint_dealloc_callback(struct endpoint* point)
 		return;
 	fd_peer=(point->vlink->fd_dpdk==point->fd_client)?point->vlink->fd_qemu:point->vlink->fd_dpdk;
 	/*2.notify other side,this half is going down*/
-
+	/*2.1 change connection in ctrl channel*/
+	change_lane_connection_status(point,point->fd_client==point->vlink->fd_dpdk,0);
 	/*3.detach fd from vlink*/
 	point->vlink->fd_dpdk=(point->vlink->fd_dpdk==point->fd_client)?0:point->vlink->fd_dpdk;
 	point->vlink->fd_qemu=(point->vlink->fd_qemu==point->fd_client)?0:point->vlink->fd_qemu;
@@ -880,7 +949,6 @@ int start_virtbus_logic()
 						break;
 				}
 				
-				printf("read status:%d\n",ret_status);
 				
 			}else if(events[idx].events&EPOLLOUT){ 
 				fd_client=events[idx].data.fd;
@@ -897,7 +965,7 @@ int start_virtbus_logic()
 					tmp_endpoint->msg_send_buffer_pending-=res;
 				}
 				if(!tmp_endpoint->msg_send_buffer_pending){
-					printf("no data sent,close epoll out\n");
+					//printf("no data sent,close epoll out\n");
 					close_epoll_out(tmp_endpoint);
 				}
 			}

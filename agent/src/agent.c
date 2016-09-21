@@ -18,6 +18,8 @@ uint64_t map_shared_memory(char * name,int length)
 	ftruncate(fd,length);
 	base=mmap(NULL,length,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
 	close(fd);
+	/*if(base)
+		memset(base,0x0,length);*/
 	return (uint64_t)base;
 }
 void unmap_shared_memory(uint64_t base,int length)

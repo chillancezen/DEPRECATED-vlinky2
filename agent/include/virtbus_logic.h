@@ -8,6 +8,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <agent.h>
+#include <vlink_channel.h>
+#include <vlink_queue.h>
 
 /*#include <nametree.h>*/
 #define VIRTIO_BUS_PORT 418

@@ -1,6 +1,5 @@
 #include <virtbus_client.h>
-#include <virt_cache.h>
-#include <virt_cpu.h>
+#include <vlink_queue.h>
 
 #define DUMP_CLIENT(ce) {\
 printf("[x] is joint:%d\n",(ce)->is_joint);\
@@ -16,6 +15,8 @@ printf("[x] allocated :%d\n",(ce)->allocated_channels);\
 }\
 }
 
+
+#define vlink_mb() _mm_mfence()
 
 int main(int argc,char**argv)
 {
@@ -104,6 +105,7 @@ int main(int argc,char**argv)
 		struct client_endpoint * ce=client_endpoint_alloc_and_init();
 		client_endpoint_init_virtual_link(ce,VLINK_ROLE_DPDK,"cute-meeeow",20,"tap-12023321-13",4);
 		DUMP_CLIENT(ce);
+		
 	}else if(argc==2){
 			struct client_endpoint * ce1=client_endpoint_alloc_and_init();
 			client_endpoint_init_virtual_link(ce1,VLINK_ROLE_DPDK,"cute-meeeow",20,"tap-12023321-14",5);
@@ -116,7 +118,28 @@ int main(int argc,char**argv)
 				DUMP_CLIENT(ce2);
 	}
 	getchar();
-	
+	return 0;
+	{
+		uint8_t buff[SUB_CHANNEL_SIZE];
+		int rc=initialize_queue(buff,SUB_CHANNEL_SIZE,5/*DEFAULT_CHANNEL_QUEUE_LENGTH*/);
+		struct queue_element ele[32];
+		ASSERT(5==enqueue_bulk((struct queue_stub*)buff,ele,32));
+		ASSERT(2==dequeue_bulk((struct queue_stub*)buff,ele,2));
+		ASSERT(2==enqueue_bulk((struct queue_stub*)buff,ele,32));
+		
+		dequeue_bulk((struct queue_stub*)buff,ele,20);
+		enqueue_bulk((struct queue_stub*)buff,ele,32);
+
+		dequeue_bulk((struct queue_stub*)buff,ele,3);
+
+		printf("[x]queue ele size:%d\n",queue_available_quantum((struct queue_stub*)buff));
+		printf("[x]queue empty:%d\n",queue_empty((struct queue_stub*)buff));
+		printf("[x]queue full:%d\n",queue_full((struct queue_stub*)buff));
+
+		void * cute=(void*)22;
+		printf("...........%d\n",cute+1);
+
+		}
 	
 	return 0;
 	

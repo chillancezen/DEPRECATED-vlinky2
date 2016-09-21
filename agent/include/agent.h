@@ -2,6 +2,7 @@
 #ifndef __AGENT_H
 #define __AGENT_H
 #include <stdint.h>
+#include <my_config.h>
 
 #define ASSERT(condition)  \
 do{ \
@@ -18,11 +19,8 @@ do{ \
 #define MIN(a,b) (((a)<(b))?(a):(b))
 
 
-#define DEFAULT_CHANNEL_QUEUE_LENGTH 1024
-#define DEFAULT_CHANNEL_QUEUE_ELEMENT_SIZE (sizeof(uint64_t)*2)
-#define DEFAULT_CHANNEL_QUEUE_HEADER_ROOM 512
 
-#define CHANNEL_SIZE (4* (DEFAULT_CHANNEL_QUEUE_ELEMENT_SIZE*DEFAULT_CHANNEL_QUEUE_LENGTH+DEFAULT_CHANNEL_QUEUE_HEADER_ROOM))
+
 struct virtual_link;
 struct  vm_domain{
 	uint8_t  domain_name[64];
