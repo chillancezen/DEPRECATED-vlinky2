@@ -318,6 +318,10 @@ void message_common_entry(struct tlv_header*tlv,void * value,void * arg)
 		case MESSAGE_TLV_VLINK_COMMON_VLINK_ROLE:
 			point->role=TO_INT32(value);
 			break;
+		case MESSAGE_TLV_VLINK_COMMON_VLINK_MAC:
+			ASSERT(tlv->length==6);
+			memcpy(point->mac_address,value,6);
+			break;
 			
 		default:
 			break;
@@ -350,7 +354,8 @@ void initialize_virtual_link_channels(struct endpoint * point)
 	ctrl->index_in_vm_domain=ctrl_channel_index;
 	ctrl->offset_to_vm_shm_base=ctrl_channel_offset;
 	ctrl->nr_data_channels=(point->vlink->nr_channels_allocated-1);
-
+	memcpy(ctrl->mac_address,point->vlink->mac_address,6);
+	
 	for(idx=0;idx<ctrl->nr_data_channels;idx++){
 		/*1.initialize data channels metadata*/
 		ctrl->channel_records[idx].index_in_m_domain=point->vlink->channels[idx+1];
@@ -485,6 +490,7 @@ void _generate_vlink_info(struct endpoint *point)
 	TLV_ADD_UINT32(MESSAGE_TLV_VLINK_COMMON_VM_MAX_CHANNELS,&point->vlink->domain->max_channels);
 	TLV_ADD_STRING(MESSAGE_TLV_VLINK_COMMON_VLINK_NAME,(char*)point->vlink->link_name);
 	TLV_ADD_UINT32(MESSAGE_TLV_VLINK_COMMON_VLINK_NR_CHANNELS,&point->vlink->nr_channels_allocated);
+	TLV_ADD_MEM(MESSAGE_TLV_VLINK_COMMON_VLINK_MAC,point->vlink->mac_address,6);
 	{
 		int idx=0;
 		for(;idx<point->vlink->nr_channels_allocated;idx++){
@@ -535,6 +541,7 @@ void message_vlink_init_entry(struct tlv_header * tlv,void * value,void*arg)
 			if(tmp_link==(void*)-1){
 				
 				ASSERT((tmp_link=alloc_virtual_link(point->virt_link)));
+				memcpy(tmp_link->mac_address,point->mac_address,6);/*it's really ugly to put it here*/
 				hashtable_set_key_value(g_vlink_hash_tbl,(uint8_t*)point->virt_link,strlen(point->virt_link),tmp_link);
 			}else{ 
 				point->vlink=tmp_link;
@@ -631,6 +638,7 @@ struct message_callback_entry cb_entries[]={
 		{MESSAGE_TLV_VLINK_COMMON_VLINK_NR_CHANNELS,message_common_entry},
 		{MESSAGE_TLV_VLINK_COMMON_VLINK_CHANNELS,message_common_entry},
 		{MESSAGE_TLV_VLINK_COMMON_VLINK_ROLE,message_common_entry},
+		{MESSAGE_TLV_VLINK_COMMON_VLINK_MAC,message_common_entry},
 		
 		{MESSAGE_TLV_VLINK_REQUEST_START,message_vlink_request_entry},
 		{MESSAGE_TLV_VLINK_REQUEST_END,message_vlink_request_entry},

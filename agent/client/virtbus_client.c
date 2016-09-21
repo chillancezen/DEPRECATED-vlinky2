@@ -100,6 +100,11 @@ int client_endpoint_request_virtual_link(struct client_endpoint*cep,char * vlink
 			ASSERT((tlv.length==(sizeof(uint32_t)*cep->allocated_channels)));
 			memcpy(cep->channels,dummy,tlv.length);
 
+			tlv.type=MESSAGE_TLV_VLINK_COMMON_VLINK_MAC;
+			check_and_goto_tag(message_parse_raw((struct message_header *)(cep->recv_buffer),cep->recv_buffer+sizeof(struct message_header),&tlv,&dummy),fails);
+			ASSERT(tlv.length==6);
+			memcpy(cep->mac_address,dummy,6);
+			
 			cep->is_joint=!0;
 			break;
 		default:
@@ -111,7 +116,7 @@ int client_endpoint_request_virtual_link(struct client_endpoint*cep,char * vlink
 	fails:
 		return -2;
 }
-int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE _role,char* vdomain_name,int max_channels,char*vlink_name,int nr_channels)
+int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE _role,char* vdomain_name,int max_channels,char*vlink_name,char*mac,int nr_channels)
 {
 
 	struct message_builder mb;
@@ -145,6 +150,9 @@ int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE
 	tlv.length=4;
 	check_and_goto_tag(message_builder_add_tlv(&mb,&tlv,&role),fails);
 
+	tlv.type=MESSAGE_TLV_VLINK_COMMON_VLINK_MAC;
+	tlv.length=6;
+	check_and_goto_tag(message_builder_add_tlv(&mb,&tlv,mac),fails);
 
 	tlv.type=MESSAGE_TLV_VLINK_INIT_END;
 	tlv.length=0;
@@ -186,6 +194,11 @@ int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE
 			ASSERT((tlv.length==(sizeof(uint32_t)*cep->allocated_channels)));
 			memcpy(cep->channels,dummy,tlv.length);
 
+			tlv.type=MESSAGE_TLV_VLINK_COMMON_VLINK_MAC;
+			check_and_goto_tag(message_parse_raw((struct message_header *)(cep->recv_buffer),cep->recv_buffer+sizeof(struct message_header),&tlv,&dummy),fails);
+			ASSERT(tlv.length==6);
+			memcpy(cep->mac_address,dummy,6);
+			
 			cep->is_joint=!0;
 			break;
 		default:
@@ -198,6 +211,13 @@ int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE
 		
 		return -2;
 }
+void client_endpoint_uninit_and_dealloc(struct client_endpoint*cep)
+{
+	if(cep->is_connected)
+		close(cep->fd_sock);
+	free(cep);
+}
+
 #if 0
 
 void client_endpoint_uninit_and_dealloc(struct client_endpoint*cep)

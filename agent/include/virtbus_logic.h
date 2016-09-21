@@ -63,6 +63,7 @@ struct endpoint{
 	enum VLINK_ROLE role;
 	char vm_domain_name[64];
 	int vm_max_channel;
+	char mac_address[6];
 	
 	char virt_link[64];
 	int nr_channels;

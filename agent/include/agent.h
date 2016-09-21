@@ -46,6 +46,7 @@ struct virtual_link {
 	struct virtual_link *next;
 	int fd_dpdk;
 	int fd_qemu;
+	uint8_t mac_address[6];
 }__attribute__((packed));
 
 

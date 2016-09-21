@@ -13,6 +13,13 @@ printf("[x] allocated :%d\n",(ce)->allocated_channels);\
 		printf("-----%d\n",(ce)->channels[idx]);\
 	}\
 }\
+printf("[x] mac address %02x:%02x:%02x:%02x:%02x:%02x\n",\
+(ce)->mac_address[0],\
+(ce)->mac_address[1],\
+(ce)->mac_address[2],\
+(ce)->mac_address[3],\
+(ce)->mac_address[4],\
+(ce)->mac_address[5]);\
 }
 
 
@@ -103,16 +110,16 @@ int main(int argc,char**argv)
 
 	if(argc==1){
 		struct client_endpoint * ce=client_endpoint_alloc_and_init();
-		client_endpoint_init_virtual_link(ce,VLINK_ROLE_DPDK,"cute-meeeow",20,"tap-12023321-13",4);
+		client_endpoint_init_virtual_link(ce,VLINK_ROLE_DPDK,"cute-meeeow",20,"tap-12023321-13","123456",4);
 		DUMP_CLIENT(ce);
 		
 	}else if(argc==2){
 			struct client_endpoint * ce1=client_endpoint_alloc_and_init();
-			client_endpoint_init_virtual_link(ce1,VLINK_ROLE_DPDK,"cute-meeeow",20,"tap-12023321-14",5);
+			client_endpoint_init_virtual_link(ce1,VLINK_ROLE_DPDK,"cute-meeeow",20,"tap-12023321-14","123456",5);
 			DUMP_CLIENT(ce1);
 		}else {
 			struct client_endpoint * ce2=client_endpoint_alloc_and_init();
-			int rc=client_endpoint_request_virtual_link(ce2,"tap-12023321-13",VLINK_ROLE_DPDK);
+			int rc=client_endpoint_request_virtual_link(ce2,"tap-12023321-13",VLINK_ROLE_QEMU);
 			//client_endpoint_init_virtual_link(ce2,VLINK_ROLE_QEMU,"cute-meeeow",20,"tap-12023321-13",5);
 			if(!rc)
 				DUMP_CLIENT(ce2);

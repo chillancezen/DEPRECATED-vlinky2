@@ -18,6 +18,10 @@ struct ctrl_channel{
 	uint32_t dpdk_connected;
 	uint32_t qemu_connected;
 	uint32_t nr_data_channels;
+	union{
+		uint32_t dummy;
+		uint8_t mac_address[6];
+	};
 	struct data_channel_record channel_records[0];
 };
 

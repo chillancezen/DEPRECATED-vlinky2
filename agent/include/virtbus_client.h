@@ -36,13 +36,16 @@ struct client_endpoint{
 	int max_channels;
 	int allocated_channels;
 	uint32_t channels[16];
+	uint8_t mac_address[6];
 };
 struct client_endpoint * client_endpoint_alloc_and_init(void);
 void client_endpoint_uninit_and_dealloc(struct client_endpoint*cep);
 
 
-int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE ,char* vdomain_name,int max_channels,char*vlink_name,int nr_channels);
+int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE ,char* vdomain_name,int max_channels,char*vlink_name,char*mac,int nr_channels);
 int client_endpoint_request_virtual_link(struct client_endpoint*cep,char * vlink_name,enum VLINK_ROLE _role);
+void client_endpoint_uninit_and_dealloc(struct client_endpoint*cep);
+
 
 int recv_tlv_message(struct  client_endpoint *cep);
 
