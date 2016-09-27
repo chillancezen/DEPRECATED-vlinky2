@@ -64,12 +64,18 @@ struct dpdk_physeg_str{
 		uint64_t virtual_address;
 	};
 };
-int add_key_value(uint64_t key,uint64_t value);
+int add_key_value(uint64_t key,uint64_t value,int is_v2p);
 void address_table_init(void);
-uint64_t lookup_key(uint64_t key);
+uint64_t lookup_key(uint64_t key,int is_v2p);
+
 void setup_virt2phy_translation_tbl(void);
 void verify_virt2phy_translation_tbl(void);
 uint64_t translate_virt_address(uint64_t virt_address);
+void verify_phy2virt_translation_tbl(void);
+void setup_phy2virt_translation_tbl(void);
+uint64_t translate_phy_address(uint64_t phy_address);
+
+
 
 
 #define HUGEPAGE_2M (1<<21)
