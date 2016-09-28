@@ -116,7 +116,7 @@ void verify_virt2phy_translation_tbl(void)
 		for(inner_idx=0;inner_idx<nr_pages;inner_idx++){
 			phy_address=mcfg->memseg[idx].phys_addr+(inner_idx*HUGEPAGE_2M);
 			vir_address=mcfg->memseg[idx].addr_64+(inner_idx*HUGEPAGE_2M);
-			RTE_ASSERT(vir_address==lookup_key(vir_address,1));
+			RTE_ASSERT(phy_address==lookup_key(vir_address,1));
 		}
 		
 	}
@@ -164,6 +164,7 @@ void verify_phy2virt_translation_tbl(void)
 		
 	}
 }
+
 
 void setup_phy2virt_translation_tbl(void)
 {
