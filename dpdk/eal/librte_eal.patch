@@ -1,5 +1,5 @@
 diff -Naur librte_eal/common/eal_common_memory.c librte_eal.new/common/eal_common_memory.c
---- librte_eal/common/eal_common_memory.c	2016-10-02 21:48:46.683078288 -0700
+--- librte_eal/common/eal_common_memory.c	2016-10-03 20:19:31.739068384 -0700
 +++ librte_eal.new/common/eal_common_memory.c	2016-10-02 21:47:27.026629169 -0700
 @@ -37,16 +37,178 @@
  #include <stdarg.h>
@@ -230,7 +230,7 @@ diff -Naur librte_eal/common/eal_common_memory.c librte_eal.new/common/eal_commo
  	return 0;
  }
 diff -Naur librte_eal/common/eal_private.h librte_eal.new/common/eal_private.h
---- librte_eal/common/eal_private.h	2016-10-02 21:48:46.687078360 -0700
+--- librte_eal/common/eal_private.h	2016-10-03 20:19:31.741068402 -0700
 +++ librte_eal.new/common/eal_private.h	2016-10-02 21:47:27.029629224 -0700
 @@ -80,7 +80,7 @@
   * @return
@@ -251,7 +251,7 @@ diff -Naur librte_eal/common/eal_private.h librte_eal.new/common/eal_private.h
  
  #endif /* _EAL_PRIVATE_H_ */
 diff -Naur librte_eal/common/include/rte_memory.h librte_eal.new/common/include/rte_memory.h
---- librte_eal/common/include/rte_memory.h	2016-10-02 21:48:46.677078179 -0700
+--- librte_eal/common/include/rte_memory.h	2016-10-03 20:19:31.743068424 -0700
 +++ librte_eal.new/common/include/rte_memory.h	2016-10-02 21:47:27.053629663 -0700
 @@ -54,6 +54,35 @@
  
@@ -290,7 +290,7 @@ diff -Naur librte_eal/common/include/rte_memory.h librte_eal.new/common/include/
  	RTE_PGSIZE_4K    = 1ULL << 12,
  	RTE_PGSIZE_64K   = 1ULL << 16,
 diff -Naur librte_eal/linuxapp/eal/eal.c librte_eal.new/linuxapp/eal/eal.c
---- librte_eal/linuxapp/eal/eal.c	2016-10-02 21:48:46.691078433 -0700
+--- librte_eal/linuxapp/eal/eal.c	2016-10-03 20:19:31.745068457 -0700
 +++ librte_eal.new/linuxapp/eal/eal.c	2016-10-02 21:47:27.059629773 -0700
 @@ -171,7 +171,7 @@
  	int retval;
@@ -343,7 +343,7 @@ diff -Naur librte_eal/linuxapp/eal/eal.c librte_eal.new/linuxapp/eal/eal.c
  
  	/* the directories are locked during eal_hugepage_info_init */
 diff -Naur librte_eal/linuxapp/eal/eal_hugepage_info.c librte_eal.new/linuxapp/eal/eal_hugepage_info.c
---- librte_eal/linuxapp/eal/eal_hugepage_info.c	2016-10-02 21:48:46.692078451 -0700
+--- librte_eal/linuxapp/eal/eal_hugepage_info.c	2016-10-03 20:19:31.749068533 -0700
 +++ librte_eal.new/linuxapp/eal/eal_hugepage_info.c	2016-10-02 21:47:27.060629791 -0700
 @@ -68,7 +68,8 @@
  {
@@ -375,8 +375,8 @@ diff -Naur librte_eal/linuxapp/eal/eal_hugepage_info.c librte_eal.new/linuxapp/e
  }
  
 diff -Naur librte_eal/linuxapp/eal/eal_memory.c librte_eal.new/linuxapp/eal/eal_memory.c
---- librte_eal/linuxapp/eal/eal_memory.c	2016-10-02 21:48:46.694078487 -0700
-+++ librte_eal.new/linuxapp/eal/eal_memory.c	2016-10-02 21:47:27.061629809 -0700
+--- librte_eal/linuxapp/eal/eal_memory.c	2016-10-03 20:19:31.753068603 -0700
++++ librte_eal.new/linuxapp/eal/eal_memory.c	2016-10-03 20:22:21.234057656 -0700
 @@ -100,6 +100,8 @@
  #include "eal_hugepages.h"
  
@@ -411,7 +411,7 @@ diff -Naur librte_eal/linuxapp/eal/eal_memory.c librte_eal.new/linuxapp/eal/eal_
  		return RTE_BAD_PHYS_ADDR;
  
  	/* standard page size */
-@@ -1153,6 +1157,104 @@
+@@ -1153,6 +1157,105 @@
  	}
  }
  
@@ -442,6 +442,7 @@ diff -Naur librte_eal/linuxapp/eal/eal_memory.c librte_eal.new/linuxapp/eal/eal_
 +				goto fails;
 +			}
 +			close(fd);
++			memset(rc,0x0,HUGEPAGE_2M);/*this it critical ,because without this,the program may crash due to same memory layout and memory garbage*/
 +			addr_offset+=HUGEPAGE_2M;
 +			nr_pages--;
 +		}
@@ -516,7 +517,7 @@ diff -Naur librte_eal/linuxapp/eal/eal_memory.c librte_eal.new/linuxapp/eal/eal_
  /*
   * Prepare physical memory mapping: fill configuration structure with
   * these infos, return 0 on success.
-@@ -1173,9 +1275,13 @@
+@@ -1173,9 +1276,13 @@
  
  	uint64_t memory[RTE_MAX_NUMA_NODES];
  
@@ -530,7 +531,7 @@ diff -Naur librte_eal/linuxapp/eal/eal_memory.c librte_eal.new/linuxapp/eal/eal_
  	void *addr;
  #ifdef RTE_EAL_SINGLE_FILE_SEGMENTS
  	int new_pages_count[MAX_HUGEPAGE_SIZES];
-@@ -1321,6 +1427,11 @@
+@@ -1321,6 +1428,11 @@
  		if (unmap_all_hugepages_orig(&tmp_hp[hp_offset], hpi) < 0)
  			goto fail;
  
@@ -542,7 +543,7 @@ diff -Naur librte_eal/linuxapp/eal/eal_memory.c librte_eal.new/linuxapp/eal/eal_
  		/* we have processed a num of hugepages of this size, so inc offset */
  		hp_offset += hpi->num_pages[0];
  #endif
-@@ -1513,12 +1624,29 @@
+@@ -1513,12 +1625,29 @@
  			RTE_MAX_MEMSEG);
  		goto fail;
  	}
