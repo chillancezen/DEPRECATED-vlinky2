@@ -37,9 +37,7 @@ struct vm_domain* alloc_vm_domain(int max_channels,char*name)
 		domain->nr_links=0;
 		domain->max_channels=max_channels;
 		domain->head=NULL;
-		domain->shm_length=domain->max_channels*4*
-			(DEFAULT_CHANNEL_QUEUE_ELEMENT_SIZE*DEFAULT_CHANNEL_QUEUE_LENGTH+
-			DEFAULT_CHANNEL_QUEUE_HEADER_ROOM);
+		domain->shm_length=domain->max_channels*CHANNEL_SIZE;
 		domain->shm_base=map_shared_memory((char*)domain->domain_name,domain->shm_length);
 		if(!domain->shm_base)
 			goto fails;

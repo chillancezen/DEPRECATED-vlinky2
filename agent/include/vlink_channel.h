@@ -8,8 +8,8 @@ struct data_channel_record{
 	uint32_t  data_channel_enabled;
 	uint64_t  rx_address_to_translate;
 	uint64_t  tx_address_to_translate;
-	uint64_t  interrupt_enabled;/*default is false*/
-};
+	uint32_t  interrupt_enabled;/*default is false*/
+}__attribute__((packed));
 
 
 struct ctrl_channel{
@@ -23,10 +23,10 @@ struct ctrl_channel{
 		uint8_t mac_address[6];
 	};
 	struct data_channel_record channel_records[0];
-};
+}__attribute__((packed));
 
 #define PTR(type_ptr,ptr) ((type_ptr)(ptr))
-#define PTR_OFFSET_BY(type_ptr,ptr,offset) PTR(type_ptr,((uint64_t)(offset)+((void*)(ptr))))
+#define PTR_OFFSET_BY(type_ptr,ptr,offset) PTR(type_ptr,((uint64_t)(offset)+((char*)(ptr))))
 
 
 #endif

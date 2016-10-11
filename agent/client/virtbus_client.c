@@ -11,7 +11,7 @@ struct client_endpoint * client_endpoint_alloc_and_init(void)
 	struct client_endpoint * ep=malloc(sizeof(struct client_endpoint));
 	int rc;
 	if(ep){
-		memset(ep,sizeof(struct client_endpoint),0x0);
+		memset(ep,0x0,sizeof(struct client_endpoint));
 		
 		ep->fd_sock=socket(PF_UNIX,SOCK_STREAM,0);
 		if(!ep->fd_sock)
@@ -210,12 +210,6 @@ int client_endpoint_init_virtual_link(struct client_endpoint*cep,enum VLINK_ROLE
 	fails:
 		
 		return -2;
-}
-void client_endpoint_uninit_and_dealloc(struct client_endpoint*cep)
-{
-	if(cep->is_connected)
-		close(cep->fd_sock);
-	free(cep);
 }
 
 #if 0

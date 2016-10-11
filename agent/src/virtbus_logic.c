@@ -13,6 +13,8 @@ int global_epfd;
 hashtable_t *socket_hash_tbl;
 hashtable_t * g_vlink_hash_tbl;
 hashtable_t * g_vdomain_hash_tbl;
+#define DEBUG_FLAG 1
+#define LOG(...) fprintf(stdout,__VA_ARGS__)
 
 /*static struct  nametree_node* virtbus_rootnode;*/
 enum read_return_status{
@@ -328,6 +330,8 @@ void message_common_entry(struct tlv_header*tlv,void * value,void * arg)
 	}
 	
 }
+
+
 void initialize_virtual_link_channels(struct endpoint * point)
 {
 	void * vm_shm_base;
@@ -355,11 +359,16 @@ void initialize_virtual_link_channels(struct endpoint * point)
 	ctrl->offset_to_vm_shm_base=ctrl_channel_offset;
 	ctrl->nr_data_channels=(point->vlink->nr_channels_allocated-1);
 	memcpy(ctrl->mac_address,point->vlink->mac_address,6);
+	#if DEBUG_FLAG
+	LOG("[x]%s(%s)\n",point->vlink->domain->domain_name,point->vlink->link_name);
+	LOG("\t[x]ctrl channel:%d(offset:%d),(nr-of-data-channels:%d)\n",ctrl->index_in_vm_domain,ctrl->offset_to_vm_shm_base,ctrl->nr_data_channels);
+	#endif
 	
 	for(idx=0;idx<ctrl->nr_data_channels;idx++){
 		/*1.initialize data channels metadata*/
 		ctrl->channel_records[idx].index_in_m_domain=point->vlink->channels[idx+1];
 		ctrl->channel_records[idx].offset_to_vm_shm_base=channel_base_offset(point->vlink->channels[idx+1]);
+		
 		ctrl->channel_records[idx].data_channel_enabled=0;/*DPDK lane rx-queue setup will enable this*/
 		ctrl->channel_records[idx].rx_address_to_translate=0;
 		ctrl->channel_records[idx].tx_address_to_translate=0;
@@ -376,6 +385,15 @@ void initialize_virtual_link_channels(struct endpoint * point)
 		ASSERT(!initialize_queue(free_sub_channel_base,SUB_CHANNEL_SIZE,DEFAULT_CHANNEL_QUEUE_LENGTH));
 		ASSERT(!initialize_queue(alloc_sub_channel_base,SUB_CHANNEL_SIZE,DEFAULT_CHANNEL_QUEUE_LENGTH));
 		ASSERT(!initialize_queue(tx_sub_channel_base,SUB_CHANNEL_SIZE,DEFAULT_CHANNEL_QUEUE_LENGTH));
+		#if DEBUG_FLAG
+		LOG("\t[x]data-channel:%d (offset:%d) (rx:%d) (free:%d) (alloc:%d) (tx:%d)\n",ctrl->channel_records[idx].index_in_m_domain,
+		(int)(ctrl->channel_records[idx].offset_to_vm_shm_base),
+		(int)(ctrl->channel_records[idx].offset_to_vm_shm_base+rx_sub_channel_offset()),
+		(int)(ctrl->channel_records[idx].offset_to_vm_shm_base+free_sub_channel_offset()),
+		(int)(ctrl->channel_records[idx].offset_to_vm_shm_base+alloc_sub_channel_offset()),
+		(int)(ctrl->channel_records[idx].offset_to_vm_shm_base+tx_sub_channel_offset())
+		);
+		#endif
 	}
 }
 void change_lane_connection_status(struct endpoint *point,int is_dpdk,int is_connected)
