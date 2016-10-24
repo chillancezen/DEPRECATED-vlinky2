@@ -1,0 +1,578 @@
+diff -Naur librte_eal/common/eal_common_memory.c librte_eal.new/common/eal_common_memory.c
+--- librte_eal/common/eal_common_memory.c	2016-10-03 20:19:31.739068384 -0700
++++ librte_eal.new/common/eal_common_memory.c	2016-10-02 21:47:27.026629169 -0700
+@@ -37,16 +37,178 @@
+ #include <stdarg.h>
+ #include <inttypes.h>
+ #include <sys/queue.h>
+-
++#include <rte_debug.h>
+ #include <rte_memory.h>
+ #include <rte_memzone.h>
+ #include <rte_eal.h>
+ #include <rte_eal_memconfig.h>
+ #include <rte_log.h>
+-
++#include <rte_jhash.h>
+ #include "eal_private.h"
+ #include "eal_internal_cfg.h"
+ 
++struct dpdk_physeg_str v2p_address_table_base[MEMORY_SEGMENT_TABLE_HASH_SIZE];
++struct dpdk_physeg_str p2v_address_table_base[MEMORY_SEGMENT_TABLE_HASH_SIZE];
++
++void address_table_init(void)
++{
++	int idx=0;
++	
++	for(;idx<MEMORY_SEGMENT_TABLE_HASH_SIZE;idx++){
++		v2p_address_table_base[idx].key=0;
++		v2p_address_table_base[idx].value=0;
++		p2v_address_table_base[idx].key=0;
++		p2v_address_table_base[idx].value=0;
++	}
++}
++
++int add_key_value(uint64_t key,uint64_t value,int is_v2p)
++{
++	uint32_t hash_value;
++	uint32_t hash_index;
++	hash_value=rte_jhash(&key,sizeof(key),RTE_JHASH_GOLDEN_RATIO);
++	hash_value&=(MEMORY_SEGMENT_TABLE_HASH_SIZE-1);
++	hash_index=hash_value;
++	/*printf("[x] %llx -->%llx %d\n",key,value,hash_index);*/
++	do{
++		
++		if((is_v2p?v2p_address_table_base:p2v_address_table_base)[hash_index].key==0){
++			(is_v2p?v2p_address_table_base:p2v_address_table_base)[hash_index].key=key;
++			(is_v2p?v2p_address_table_base:p2v_address_table_base)[hash_index].value=value;
++			return 0;
++		}
++		hash_index=(hash_index+1)%MEMORY_SEGMENT_TABLE_HASH_SIZE;
++	}while(hash_index!=hash_value);
++	return -1;
++}
++
++uint64_t lookup_key(uint64_t key,int is_v2p)
++{
++	uint32_t hash_value;
++	uint32_t hash_index;
++	uint64_t ret=0;
++	hash_value=rte_jhash(&key,sizeof(key),RTE_JHASH_GOLDEN_RATIO);
++	hash_value&=(MEMORY_SEGMENT_TABLE_HASH_SIZE-1);
++	hash_index=hash_value;
++	do{
++		if((is_v2p?v2p_address_table_base:p2v_address_table_base)[hash_index].key==key){
++			ret=(is_v2p?v2p_address_table_base:p2v_address_table_base)[hash_index].value;
++			break;
++		}
++		hash_index=(hash_index+1)%MEMORY_SEGMENT_TABLE_HASH_SIZE;
++	}while(hash_index!=hash_value);
++	return ret;
++}
++void verify_virt2phy_translation_tbl(void)
++{
++	const struct rte_mem_config *mcfg;
++	unsigned idx = 0;
++	int inner_idx=0;
++	int nr_pages;
++	uint64_t __attribute__((unused)) phy_address;
++	uint64_t __attribute__((unused)) vir_address;
++	
++	mcfg = rte_eal_get_configuration()->mem_config;
++	for (idx = 0; idx < RTE_MAX_MEMSEG; idx++) {
++		if (mcfg->memseg[idx].addr == NULL)
++			break;
++		nr_pages=mcfg->memseg[idx].len/HUGEPAGE_2M;
++		for(inner_idx=0;inner_idx<nr_pages;inner_idx++){
++			phy_address=mcfg->memseg[idx].phys_addr+(inner_idx*HUGEPAGE_2M);
++			vir_address=mcfg->memseg[idx].addr_64+(inner_idx*HUGEPAGE_2M);
++			RTE_ASSERT(phy_address==lookup_key(vir_address,1));
++		}
++		
++	}
++}
++void setup_virt2phy_translation_tbl(void)
++{
++	const struct rte_mem_config *mcfg;
++	unsigned idx = 0;
++	int inner_idx=0;
++	int nr_pages;
++	uint64_t phy_address;
++	uint64_t vir_address;
++	
++	mcfg = rte_eal_get_configuration()->mem_config;
++	for (idx = 0; idx < RTE_MAX_MEMSEG; idx++) {
++		if (mcfg->memseg[idx].addr == NULL)
++			break;
++		nr_pages=mcfg->memseg[idx].len/HUGEPAGE_2M;
++		for(inner_idx=0;inner_idx<nr_pages;inner_idx++){
++			phy_address=mcfg->memseg[idx].phys_addr+(inner_idx*HUGEPAGE_2M);
++			vir_address=mcfg->memseg[idx].addr_64+(inner_idx*HUGEPAGE_2M);
++			add_key_value(vir_address,phy_address,1);
++		}
++	}
++}
++void verify_phy2virt_translation_tbl(void)
++{
++	const struct rte_mem_config *mcfg;
++	unsigned idx = 0;
++	int inner_idx=0;
++	int nr_pages;
++	uint64_t __attribute__((unused)) phy_address;
++	uint64_t __attribute__((unused)) vir_address;
++	
++	mcfg = rte_eal_get_configuration()->mem_config;
++	for (idx = 0; idx < RTE_MAX_MEMSEG; idx++) {
++		if (mcfg->memseg[idx].addr == NULL)
++			break;
++		nr_pages=mcfg->memseg[idx].len/HUGEPAGE_2M;
++		for(inner_idx=0;inner_idx<nr_pages;inner_idx++){
++			phy_address=mcfg->memseg[idx].phys_addr+(inner_idx*HUGEPAGE_2M);
++			vir_address=mcfg->memseg[idx].addr_64+(inner_idx*HUGEPAGE_2M);
++			RTE_ASSERT(vir_address==lookup_key(phy_address,0));
++		}
++		
++	}
++}
++
++
++void setup_phy2virt_translation_tbl(void)
++{
++	const struct rte_mem_config *mcfg;
++	unsigned idx = 0;
++	int inner_idx=0;
++	int nr_pages;
++	uint64_t phy_address;
++	uint64_t vir_address;
++	
++	mcfg = rte_eal_get_configuration()->mem_config;
++	for (idx = 0; idx < RTE_MAX_MEMSEG; idx++) {
++		if (mcfg->memseg[idx].addr == NULL)
++			break;
++		nr_pages=mcfg->memseg[idx].len/HUGEPAGE_2M;
++		for(inner_idx=0;inner_idx<nr_pages;inner_idx++){
++			phy_address=mcfg->memseg[idx].phys_addr+(inner_idx*HUGEPAGE_2M);
++			vir_address=mcfg->memseg[idx].addr_64+(inner_idx*HUGEPAGE_2M);
++			add_key_value(phy_address,vir_address,0);
++		}
++	}
++}
++
++uint64_t translate_virt_address(uint64_t virt_address)
++{
++	uint64_t page_address=virt_address&(~HUGEPAGE_2M_MASK);
++	uint64_t address_offset=virt_address&HUGEPAGE_2M_MASK;
++	uint64_t page_phy_address=lookup_key(page_address,1);
++	if(!page_phy_address)//loopup failure
++		return 0;
++	
++	return page_phy_address|address_offset;
++}
++uint64_t translate_phy_address(uint64_t phy_address)
++{
++	uint64_t page_address=phy_address&(~HUGEPAGE_2M_MASK);
++	uint64_t address_offset=phy_address&HUGEPAGE_2M_MASK;
++	uint64_t page_vir_address=lookup_key(page_address,0);
++	if(!page_vir_address)//loopup failure
++		return 0;
++	
++	return page_vir_address|address_offset;
++}
++
+ /*
+  * Return a pointer to a read-only table of struct rte_physmem_desc
+  * elements, containing the layout of all addressable physical
+@@ -86,14 +248,15 @@
+ {
+ 	const struct rte_mem_config *mcfg;
+ 	unsigned i = 0;
+-
++	
+ 	/* get pointer to global configuration */
+ 	mcfg = rte_eal_get_configuration()->mem_config;
+-
+ 	for (i = 0; i < RTE_MAX_MEMSEG; i++) {
+ 		if (mcfg->memseg[i].addr == NULL)
+ 			break;
+-
++		//add_key_value(mcfg->memseg[i].phys_addr,mcfg->memseg[i].addr);
++	/*	printf("hash :0x%x    ",rte_jhash(&mcfg->memseg[i].phys_addr,
++			sizeof(mcfg->memseg[i].phys_addr),RTE_JHASH_GOLDEN_RATIO));*/
+ 		fprintf(f, "Segment %u: phys:0x%"PRIx64", len:%zu, "
+ 		       "virt:%p, socket_id:%"PRId32", "
+ 		       "hugepage_sz:%"PRIu64", nchannel:%"PRIx32", "
+@@ -137,18 +300,23 @@
+ 
+ /* init memory subsystem */
+ int
+-rte_eal_memory_init(void)
++rte_eal_memory_init(int init_flag)
+ {
+ 	RTE_LOG(DEBUG, EAL, "Setting up physically contiguous memory...\n");
+-
++	address_table_init();
+ 	const int retval = rte_eal_process_type() == RTE_PROC_PRIMARY ?
+-			rte_eal_hugepage_init() :
++			(init_flag?rte_eal_hugepage_init():rte_eal_hugepage_init_from_metadata()) :
+ 			rte_eal_hugepage_attach();
++
++			
+ 	if (retval < 0)
+ 		return -1;
+ 
+ 	if (internal_config.no_shconf == 0 && rte_eal_memdevice_init() < 0)
+ 		return -1;
+-
++	setup_virt2phy_translation_tbl();
++	verify_virt2phy_translation_tbl();
++	setup_phy2virt_translation_tbl();
++	verify_phy2virt_translation_tbl();
+ 	return 0;
+ }
+diff -Naur librte_eal/common/eal_private.h librte_eal.new/common/eal_private.h
+--- librte_eal/common/eal_private.h	2016-10-03 20:19:31.741068402 -0700
++++ librte_eal.new/common/eal_private.h	2016-10-02 21:47:27.029629224 -0700
+@@ -80,7 +80,7 @@
+  * @return
+  *   0 on success, negative on error
+  */
+-int rte_eal_memory_init(void);
++int rte_eal_memory_init(int);
+ 
+ /**
+  * Configure timers
+@@ -324,5 +324,8 @@
+  * This function is private to the EAL.
+  */
+ int rte_eal_hugepage_attach(void);
++int _rte_map_continuous_memory_area(uint64_t target_addr,const uint64_t phy_addr, int nr_pages);
++int rte_eal_hugepage_init_from_metadata(void);
++
+ 
+ #endif /* _EAL_PRIVATE_H_ */
+diff -Naur librte_eal/common/include/rte_memory.h librte_eal.new/common/include/rte_memory.h
+--- librte_eal/common/include/rte_memory.h	2016-10-03 20:19:31.743068424 -0700
++++ librte_eal.new/common/include/rte_memory.h	2016-10-02 21:47:27.053629663 -0700
+@@ -54,6 +54,35 @@
+ 
+ #include <rte_common.h>
+ 
++struct dpdk_physeg_str{	
++	union{
++		uint64_t key;
++		uint64_t physical_address;
++	};
++	union{
++		uint64_t value;
++		uint64_t virtual_address;
++	};
++};
++int add_key_value(uint64_t key,uint64_t value,int is_v2p);
++void address_table_init(void);
++uint64_t lookup_key(uint64_t key,int is_v2p);
++
++void setup_virt2phy_translation_tbl(void);
++void verify_virt2phy_translation_tbl(void);
++uint64_t translate_virt_address(uint64_t virt_address);
++void verify_phy2virt_translation_tbl(void);
++void setup_phy2virt_translation_tbl(void);
++uint64_t translate_phy_address(uint64_t phy_address);
++
++
++
++
++#define HUGEPAGE_2M (1<<21)
++#define HUGEPAGE_2M_MASK ((1<<21)-1)
++#define MEMORY_SEGMENT_TABLE_HASH_SIZE (1024*8)/*must be power of 2*/
++
++
+ enum rte_page_sizes {
+ 	RTE_PGSIZE_4K    = 1ULL << 12,
+ 	RTE_PGSIZE_64K   = 1ULL << 16,
+diff -Naur librte_eal/linuxapp/eal/eal.c librte_eal.new/linuxapp/eal/eal.c
+--- librte_eal/linuxapp/eal/eal.c	2016-10-03 20:19:31.745068457 -0700
++++ librte_eal.new/linuxapp/eal/eal.c	2016-10-02 21:47:27.059629773 -0700
+@@ -171,7 +171,7 @@
+ 	int retval;
+ 
+ 	const char *pathname = eal_runtime_config_path();
+-
++	/*const char* pathname="./.rte_dummy_config";*/
+ 	if (internal_config.no_shconf)
+ 		return;
+ 
+@@ -739,10 +739,20 @@
+ 	const char *logid;
+ 	char cpuset[RTE_CPU_AFFINITY_STR_LEN];
+ 	char thread_name[RTE_MAX_THREAD_NAME_LEN];
+-
++	int init_flag=0;
++		{/*read from file*/
++		FILE* fp_flag;
++		int flag_number;
++		fp_flag=fopen("/tmp/dpdk-eal-flag","r");
++		if(fp_flag){
++			fscanf(fp_flag,"%d\n",&flag_number);
++			init_flag=!!flag_number;
++			fclose(fp_flag);
++			}
++		}
+ 	if (!rte_atomic32_test_and_set(&run_once))
+ 		return -1;
+-
++	
+ 	logid = strrchr(argv[0], '/');
+ 	logid = strdup(logid ? logid + 1: argv[0]);
+ 
+@@ -766,7 +776,7 @@
+ 	if (internal_config.no_hugetlbfs == 0 &&
+ 			internal_config.process_type != RTE_PROC_SECONDARY &&
+ 			internal_config.xen_dom0_support == 0 &&
+-			eal_hugepage_info_init() < 0)
++			(init_flag&&eal_hugepage_info_init() < 0))
+ 		rte_panic("Cannot get hugepage information\n");
+ 
+ 	if (internal_config.memory == 0 && internal_config.force_sockets == 0) {
+@@ -802,7 +812,7 @@
+ 		rte_panic("Cannot init IVSHMEM\n");
+ #endif
+ 
+-	if (rte_eal_memory_init() < 0)
++	if (rte_eal_memory_init(init_flag) < 0)
+ 		rte_panic("Cannot init memory\n");
+ 
+ 	/* the directories are locked during eal_hugepage_info_init */
+diff -Naur librte_eal/linuxapp/eal/eal_hugepage_info.c librte_eal.new/linuxapp/eal/eal_hugepage_info.c
+--- librte_eal/linuxapp/eal/eal_hugepage_info.c	2016-10-03 20:19:31.749068533 -0700
++++ librte_eal.new/linuxapp/eal/eal_hugepage_info.c	2016-10-23 21:20:27.539926045 -0700
+@@ -68,7 +68,8 @@
+ {
+ 	char path[PATH_MAX];
+ 	long unsigned resv_pages, num_pages = 0;
+-	const char *nr_hp_file = "free_hugepages";
++	/*const char *nr_hp_file = "free_hugepages";*/
++	const char *nr_hp_file="nr_hugepages";
+ 	const char *nr_rsvd_file = "resv_hugepages";
+ 
+ 	/* first, check how many reserved pages kernel reports */
+@@ -85,7 +86,7 @@
+ 	if (num_pages == 0)
+ 		RTE_LOG(WARNING, EAL, "No free hugepages reported in %s\n",
+ 				subdir);
+-
++	#if 0
+ 	/* adjust num_pages */
+ 	if (num_pages >= resv_pages)
+ 		num_pages -= resv_pages;
+@@ -96,7 +97,9 @@
+ 	 * anyway ... */
+ 	if (num_pages > UINT32_MAX)
+ 		num_pages = UINT32_MAX;
+-
++	#endif
++	/*printf("return :%d\n",num_pages);*/
++	num_pages=(num_pages>512)?512:num_pages;
+ 	return num_pages;
+ }
+ 
+diff -Naur librte_eal/linuxapp/eal/eal_memory.c librte_eal.new/linuxapp/eal/eal_memory.c
+--- librte_eal/linuxapp/eal/eal_memory.c	2016-10-03 20:19:31.753068603 -0700
++++ librte_eal.new/linuxapp/eal/eal_memory.c	2016-10-03 20:22:21.234057656 -0700
+@@ -100,6 +100,8 @@
+ #include "eal_hugepages.h"
+ 
+ #define PFN_MASK_SIZE	8
++#define HUGEPAGE_METADATA_PATH "/tmp/dpdk-memory-metadata"
++#define HUGEPAGE_SEGMENT_METADATA_PATH "/tmp/dpdk-segment-metadata"
+ 
+ #ifdef RTE_LIBRTE_XEN_DOM0
+ int rte_xen_dom0_supported(void)
+@@ -120,6 +122,7 @@
+  * zone as well as a physical contiguous zone.
+  */
+ 
++static int init_flag=0;
+ static uint64_t baseaddr_offset;
+ 
+ static unsigned proc_pagemap_readable;
+@@ -166,6 +169,7 @@
+ 	int page_size;
+ 	off_t offset;
+ 
++	//return translate_virt_address((uint64_t)virtaddr);
+ 	/* when using dom0, /proc/self/pagemap always returns 0, check in
+ 	 * dpdk memory by browsing the memsegs */
+ 	if (rte_xen_dom0_supported()) {
+@@ -190,7 +194,7 @@
+ 	}
+ 
+ 	/* Cannot parse /proc/self/pagemap, no need to log errors everywhere */
+-	if (!proc_pagemap_readable)
++	if (!init_flag&&!proc_pagemap_readable)
+ 		return RTE_BAD_PHYS_ADDR;
+ 
+ 	/* standard page size */
+@@ -1153,6 +1157,105 @@
+ 	}
+ }
+ 
++
++int _rte_map_continuous_memory_area(uint64_t target_addr,const uint64_t phy_addr, int nr_pages)
++{
++	char  path[64];
++	uint64_t phy_addr_buff;
++	int ready_to_map=0;
++	uint64_t addr_offset=0;
++	FILE*fp=fopen(HUGEPAGE_METADATA_PATH,"r");
++	if(!fp)
++		return -1;
++	while(!feof(fp)&&(nr_pages>0)){
++		memset(path,0x0,sizeof(path));
++		fscanf(fp,"%s%"PRIx64"\n",path,&phy_addr_buff);
++		if(phy_addr_buff==phy_addr)
++			ready_to_map=1;
++		if(ready_to_map){
++			int fd=open(path,O_RDWR,0);
++			if(fd<0){
++				close(fd);
++				goto fails;
++				}
++			void* rc=mmap((void*)(target_addr+addr_offset),HUGEPAGE_2M,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
++			if(rc==MAP_FAILED){
++				close(fd);
++				goto fails;
++			}
++			close(fd);
++			memset(rc,0x0,HUGEPAGE_2M);/*this it critical ,because without this,the program may crash due to same memory layout and memory garbage*/
++			addr_offset+=HUGEPAGE_2M;
++			nr_pages--;
++		}
++	}
++
++	fclose(fp);
++	return 0;
++	fails:
++		fclose(fp);
++		return -1;
++}
++
++
++int rte_eal_hugepage_init_from_metadata(void)
++{
++	uint64_t phy_address;
++	uint64_t virt_address;
++	uint64_t seg_length;
++	uint64_t hugepage_sz;
++	uint32_t socket_id;
++	uint32_t nchannel;
++	uint32_t nrank;
++	uint64_t target_addr;
++	size_t sz;
++	struct rte_mem_config *mcfg;
++	int seg_iptr=0;
++	int rc;
++	printf("[x]initialize hugepage from metadata file\n");
++	init_flag=1;
++	mcfg=rte_eal_get_configuration()->mem_config;
++	FILE* fp=fopen(HUGEPAGE_SEGMENT_METADATA_PATH,"r");
++	if(!fp)
++		return -1;
++	while(!feof(fp)){
++		fscanf(fp,"%"PRIx64"%"PRIx64"%"PRIu64"%"PRIu64"%d%d%d\n",&phy_address,
++			&virt_address,
++			&seg_length,
++			&hugepage_sz,
++			&socket_id,
++			&nchannel,
++			&nrank);
++		if(!phy_address||!virt_address)
++			continue;
++		mcfg->memseg[seg_iptr].phys_addr=phy_address;
++		mcfg->memseg[seg_iptr].addr_64=virt_address;
++		mcfg->memseg[seg_iptr].len=seg_length;
++		mcfg->memseg[seg_iptr].hugepage_sz=hugepage_sz;
++		mcfg->memseg[seg_iptr].socket_id=socket_id;
++		mcfg->memseg[seg_iptr].nchannel=nchannel;
++		mcfg->memseg[seg_iptr].nrank=nrank;
++		sz=seg_length;
++		target_addr=(uint64_t)get_virtual_area(&sz,hugepage_sz);
++		if(sz!=seg_length){
++			printf("[x]No enough memory space\n");
++			fclose(fp);
++			return -1;
++		}
++		rc=_rte_map_continuous_memory_area(target_addr,phy_address,seg_length/hugepage_sz);
++		if(!rc)
++			mcfg->memseg[seg_iptr].addr_64=target_addr;
++		else{
++			printf("[x]something is wrong with hugepage mapping:%s\n",strerror(errno));
++			fclose(fp);
++			return -1;
++		}
++		seg_iptr++;
++	}
++		
++	fclose(fp);
++	return 0;
++}
+ /*
+  * Prepare physical memory mapping: fill configuration structure with
+  * these infos, return 0 on success.
+@@ -1173,9 +1276,13 @@
+ 
+ 	uint64_t memory[RTE_MAX_NUMA_NODES];
+ 
++	int idx=0;
+ 	unsigned hp_offset;
+ 	int i, j, new_memseg;
+ 	int nr_hugefiles, nr_hugepages = 0;
++	FILE * fp=fopen(HUGEPAGE_METADATA_PATH,"w+");
++	FILE * fp_seg=fopen(HUGEPAGE_SEGMENT_METADATA_PATH,"w+");
++	printf("[x]initialize hugepage from DPDK eal\n");
+ 	void *addr;
+ #ifdef RTE_EAL_SINGLE_FILE_SEGMENTS
+ 	int new_pages_count[MAX_HUGEPAGE_SIZES];
+@@ -1321,6 +1428,11 @@
+ 		if (unmap_all_hugepages_orig(&tmp_hp[hp_offset], hpi) < 0)
+ 			goto fail;
+ 
++		/*record hugepage metadata*/
++		for(idx=0;idx<nr_hugepages;idx++){
++			fprintf(fp,"%s 0x%"PRIx64"\n",tmp_hp[idx].filepath,rte_mem_virt2phy(tmp_hp[idx].final_va));
++		}
++		printf("[x] number of hugepages:%d\n",nr_hugepages);
+ 		/* we have processed a num of hugepages of this size, so inc offset */
+ 		hp_offset += hpi->num_pages[0];
+ #endif
+@@ -1513,12 +1625,29 @@
+ 			RTE_MAX_MEMSEG);
+ 		goto fail;
+ 	}
+-
++	{
++		int idx;
++		for(idx=0;idx<RTE_MAX_MEMSEG;idx++){
++			if(!mcfg->memseg[idx].addr)
++				break;
++			fprintf(fp_seg,"%"PRIx64" %"PRIx64" %d %d %d %d %d\n",mcfg->memseg[idx].phys_addr,
++				mcfg->memseg[idx].addr_64,
++				mcfg->memseg[idx].len,
++				mcfg->memseg[idx].hugepage_sz,
++				mcfg->memseg[idx].socket_id,
++				mcfg->memseg[idx].nchannel,
++				mcfg->memseg[idx].nrank
++				);
++		}
++	}
+ 	munmap(hugepage, nr_hugefiles * sizeof(struct hugepage_file));
+-
++	fclose(fp);
++	fclose(fp_seg);
++	
+ 	return 0;
+ 
+ fail:
++	fclose(fp);
+ 	huge_recover_sigbus();
+ 	free(tmp_hp);
+ 	if (hugepage != NULL)
