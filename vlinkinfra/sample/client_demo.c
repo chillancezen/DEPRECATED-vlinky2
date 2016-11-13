@@ -116,10 +116,10 @@ int main(int argc,char**argv)
 			struct client_endpoint * ce1=client_endpoint_alloc_and_init();
 			client_endpoint_init_virtual_link(ce1,VLINK_ROLE_DPDK,"cute-meeeow",20,"tap-12023321-14","123456",5);
 			DUMP_CLIENT(ce1);
-		}else {
+	}else {
 			struct client_endpoint * ce2=client_endpoint_alloc_and_init();
-			int rc=client_endpoint_request_virtual_link(ce2,"tap-234553",VLINK_ROLE_DPDK);
-			//client_endpoint_init_virtual_link(ce2,VLINK_ROLE_QEMU,"cute-meeeow",20,"tap-12023321-13",5);
+			int rc=client_endpoint_request_virtual_link(ce2,"tap123",VLINK_ROLE_DPDK);
+
 			if(!rc)
 				DUMP_CLIENT(ce2);
 	}

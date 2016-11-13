@@ -4,6 +4,12 @@
 #include <linux/uio_driver.h>
 #include "front-config.h"
 
+#define _VLINK_IN_KERNEL
+#include "vlink_channel.h"
+#include "my_config.h"
+#include <asm/io.h>
+
+
 #define VENDOR_ID 0xcccc
 #define DEVICE_ID 0x2222
 
@@ -14,7 +20,14 @@ struct pci_vlink_private{
 	int bar0_start;
 	int bar0_size;
 	int bar0_flag;
+
+	int bar3_start;
+	int bar3_size;
+	int bar3_flag;
+	void * __iomem bar3_mapped_addr;
+	
 	int is_initialized;
+	int open_ref_cnt;
 };
 
 struct pci_device_id vlink_device_id_tbl[]={
@@ -22,7 +35,7 @@ struct pci_device_id vlink_device_id_tbl[]={
 	{0}
 };
 
-/*the flollowing three helper functons are imported from DPDK iigb_uio*/
+/*the flollowing three helper functons are imported from DPDK igb_uio*/
 static int vlink_uio_pci_setup_iomem(struct pci_dev *dev, struct uio_info *info, int n, int pci_bar, const char *name)
 {
 	unsigned long addr, len;
@@ -104,7 +117,48 @@ static int vlink_uio_setup_bars(struct pci_dev *dev, struct uio_info *info)
 }
 
 
-
+int vlink_uio_device_open(struct uio_info *info,struct  inode* inode)
+{
+	struct pci_vlink_private * private=(struct pci_vlink_private*)info->priv;
+	int idx=0;
+	struct ctrl_channel * ctrl;
+	uint32_t ctrl_index;
+	
+	if(!private->open_ref_cnt)/*open for 1st time*/
+	for(idx=0;idx<MAX_LINKS;idx++){
+		outl_p(idx,private->bar0_start+BAR0_OFFSET_COMMON_0_REG);
+		ctrl_index=inl_p(private->bar0_start+BAR0_OFFSET_COMMAMD_LINK_CTRL_CHANNEL_IDX_REG);
+		if(ctrl_index==0xffffffff)
+			continue;
+		ctrl=PTR_OFFSET_BY(struct ctrl_channel*,private->bar3_mapped_addr,channel_base_offset(ctrl_index));
+		ctrl->qemu_driver_state=DRIVER_STATUS_INITIALIZING;/*set driver state to INITIALIZING*/
+	}
+	if(!private->open_ref_cnt)
+	printk("uio_vlink:set driver state to DRIVER_STATUS_INITIALIZING\n");
+	private->open_ref_cnt++;
+	return 0;
+}
+int vlink_uio_device_release(struct uio_info *info,struct inode* inode)
+{
+	struct pci_vlink_private * private=(struct pci_vlink_private*)info->priv;
+	int idx=0;
+	struct ctrl_channel * ctrl;
+	uint32_t ctrl_index;
+	
+	private->open_ref_cnt--;
+	if(!private->open_ref_cnt)
+	for(idx=0;idx<MAX_LINKS;idx++){
+		outl_p(idx,private->bar0_start+BAR0_OFFSET_COMMON_0_REG);
+		ctrl_index=inl_p(private->bar0_start+BAR0_OFFSET_COMMAMD_LINK_CTRL_CHANNEL_IDX_REG);
+		if(ctrl_index==0xffffffff)
+			continue;
+		ctrl=PTR_OFFSET_BY(struct ctrl_channel*,private->bar3_mapped_addr,channel_base_offset(ctrl_index));
+		ctrl->qemu_driver_state=DRIVER_STATUS_NOT_INITIALIZED;/*reset driver state*/
+	}
+	if(!private->open_ref_cnt)
+	printk("uio_vlink:set driver state to DRIVER_STATUS_NOT_INITIALIZED\n");
+	return 0;
+}
 static int vlink_pci_probe(struct pci_dev*dev,const struct pci_device_id * id)
 {
 	struct pci_vlink_private *private= kzalloc(sizeof(struct pci_vlink_private),GFP_KERNEL);
@@ -119,12 +173,20 @@ static int vlink_pci_probe(struct pci_dev*dev,const struct pci_device_id * id)
 		goto out_disable;
 	
 	private->pdev=dev;
+	private->open_ref_cnt=0;
+	
 	pci_set_drvdata(dev,private);
 
 	private->bar0_start=pci_resource_start(dev,0);
 	private->bar0_size=pci_resource_len(dev,0);
 	private->bar0_flag=pci_resource_flags(dev,0);
 
+	private->bar3_start=pci_resource_start(dev,3);
+	private->bar3_size=pci_resource_len(dev,3);
+	private->bar3_flag=pci_resource_flags(dev,3);
+	private->bar3_mapped_addr=pci_ioremap_bar(dev,3);
+
+	printk("bar3 mapped address:0x%llx\n",(long long unsigned int)private->bar3_mapped_addr);
 	outl(0,private->bar0_start+BAR0_OFFSET_INTERRUPT_ENABLE_REG);/*disbale interrupt first*/
 	
 	
@@ -132,6 +194,8 @@ static int vlink_pci_probe(struct pci_dev*dev,const struct pci_device_id * id)
 	private->uio.version="0.1";
 	private->uio.priv=private;
 	private->uio.irq=/*dev->irq*/UIO_IRQ_NONE;
+	private->uio.open=vlink_uio_device_open;
+	private->uio.release=vlink_uio_device_release;
 	/*todo:interrupt features*/
 	/*todo:open/release features*/
 	
@@ -143,6 +207,8 @@ static int vlink_pci_probe(struct pci_dev*dev,const struct pci_device_id * id)
 	return 0;
 	
 	out_release:
+		if(private->bar3_mapped_addr)
+			pci_iounmap(dev,private->bar3_mapped_addr);
 		pci_release_regions(dev);
 	out_disable:
 		pci_disable_device(dev);
@@ -153,7 +219,8 @@ static int vlink_pci_probe(struct pci_dev*dev,const struct pci_device_id * id)
 static void vlink_pci_remove(struct pci_dev *dev)
 {
 	struct pci_vlink_private *private =pci_get_drvdata(dev);
-	
+	if(private->bar3_mapped_addr)
+		pci_iounmap(dev,private->bar3_mapped_addr);
 	uio_unregister_device(&private->uio);
 	pci_release_regions(dev);
 	pci_disable_device(dev);

@@ -22,7 +22,10 @@
 struct dpdk_mmap_record{
 	char hugepage_file_path[64];
 	uint64_t phy_address;
-	uint64_t vir_address;
+	union{
+		uint64_t vir_address;
+		uint16_t vir_index;
+	};
 };
 
 struct dpdk_mmap_record * alloc_dpdk_mmap_record_array(void);

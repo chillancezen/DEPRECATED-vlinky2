@@ -8,6 +8,7 @@ int vlink_device_initialize(struct vlink_device * device)
 {
 	int rc;
 	int bar_num;
+	char path[64];
 	memset(device,0x0,sizeof(struct vlink_device));
 	
 	device->uio_device_num=find_uio_device_number_by_vendor_and_device_id(VLINK_VENDOR_ID,VLINK_DEVICE_ID);
@@ -19,6 +20,7 @@ int vlink_device_initialize(struct vlink_device * device)
 	rc=iopl(3);/*grant all rights to access io ports*/
 	/*rc=ioperm(device->bar0_base,device->bar0_size,1);*/
 	device->nr_host_hugepages=inl(device->bar0_base+BAR0_OFFSET_COMMAND_NR_PAGES_REG);
+	printf("[rte_vlink]nr of host hugepages:%d\n",device->nr_host_hugepages);
 	
 	/*retrive anything about BAR2*/
 	rc=get_uio_memory_info(device->uio_device_num,0,&bar_num,(int*)&device->host_mapping_size);
@@ -27,7 +29,8 @@ int vlink_device_initialize(struct vlink_device * device)
 	device->host_hugepage_base=(uint64_t)map_uio_region_memory_from_char_device_alligned(device->uio_device_num,0,device->host_mapping_size);
 	if(device->host_hugepage_base==-1)
 		return -4;
-
+	printf("[rte_vlink]host hugepages mapping:0x%"PRIx64"\n",device->host_hugepage_base);
+	
 	/*retrive anything about BAR3*/
 	rc=get_uio_memory_info(device->uio_device_num,1,&bar_num,(int*)&device->ctrl_channel_size);
 	if(rc<0 || bar_num!=3)
@@ -35,13 +38,60 @@ int vlink_device_initialize(struct vlink_device * device)
 	device->ctrl_channel_base=(uint64_t)map_uio_region_memory_from_char_device_alligned(device->uio_device_num,1,device->ctrl_channel_size);
 	if(device->ctrl_channel_base==-1)
 		return -6;
-	
+
+	printf("[rte_vlink]ctrl channel mapping:0x%"PRIx64"\n",device->ctrl_channel_base);
+
+	sprintf(path,"/dev/uio%d",device->uio_device_num);
+	device->fd_dummy=open(path,O_RDWR);
 	return 0;
 }
 
-int establish_translation_tbl(struct vlink_device * device)
+int establish_translation_tbl(struct vlink_device * device,mem_alloc m_alloc,mem_dealloc m_free)
 {
 	int idx=0;
+	int rc=0;
+	struct dpdk_mmap_record *record=malloc(device->nr_host_hugepages*sizeof(struct dpdk_mmap_record));
+	if(record)
+		memset(record,0x0,device->nr_host_hugepages*sizeof(struct dpdk_mmap_record));
+	for(idx=0;idx<device->nr_host_hugepages;idx++){
+		uint32_t addr_lo;
+		uint32_t addr_hi;
+		uint64_t phy_addr;
+		outl_p(idx,device->bar0_base+BAR0_OFFSET_COMMON_0_REG);
+		addr_lo=inl_p(device->bar0_base+BAR0_OFFSET_COMMAND_HUGEPAGE_LO_ADDRESS_REG);
+		addr_hi=inl_p(device->bar0_base+BAR0_OFFSET_COMMAND_HUGEPAGE_HI_ADDRESS_REG);
+		phy_addr=((uint64_t)addr_hi)<<32|addr_lo;
+
+		record[idx].phy_address=phy_addr;
+		record[idx].vir_index=idx;
+	}
+	rc=setup_phy2virt_translation_table(&device->p2v_tbl,
+		device->host_hugepage_base,
+		record,
+		device->nr_host_hugepages,
+		m_alloc,
+		m_free);
+	if(rc)
+		goto fails;
+	for(idx=0;idx<device->nr_host_hugepages;idx++){
+		record[idx].vir_address=device->host_hugepage_base+idx*_HUGEPAGE_2M;
+	}
+	rc=setup_virt2phy_translation_table(&device->v2p_tbl,
+		device->host_hugepage_base,
+		record,
+		device->nr_host_hugepages,
+		m_alloc,
+		m_free);
+	free(record);
+	return 0;
+	fails:
+		if(record)
+			free(record);
+		uninitialize_phy2virt_table(&device->p2v_tbl,m_free);
+		uninitialize_virt2phy_table(&device->v2p_tbl,m_free);
+		
+		return -1;
+	#if 0
 	struct dpdk_mmap_record *record=malloc(device->nr_host_hugepages*sizeof(struct dpdk_mmap_record));
 	if(record)
 		memset(record,0x0,device->nr_host_hugepages*sizeof(struct dpdk_mmap_record));
@@ -75,7 +125,7 @@ int establish_translation_tbl(struct vlink_device * device)
 		if(device->v2p_hashtbl)
 			free(device->v2p_hashtbl);
 		return -1;
-		
+	#endif	
 }
 int scan_virtual_link(struct vlink_device * device)
 {
@@ -83,21 +133,26 @@ int scan_virtual_link(struct vlink_device * device)
 	int is_link_enabled ;
 	int ctrl_channel_idx;
 	int iptr=0;
-	printf("[x]scan virtual links... ...\n");
+	printf("[rte_vlink]scan virtual links... ...\n");
 	for(;idx<MAX_LINKS;idx++){
 		device->us_link_desc[idx].ctrl_channel_index=0xffffffff;
+		
+		
 		outl_p(idx,device->bar0_base+BAR0_OFFSET_COMMON_0_REG);
+		
 		/*1.check whether the link is available*/
 		is_link_enabled= inl_p(device->bar0_base+BAR0_OFFSET_COMMAND_LINK_ENABLED_REG);
 		if(!is_link_enabled)
 			continue;
+
 		/*2.try to obtain the controll channel index*/
 		ctrl_channel_idx=inl_p(device->bar0_base+BAR0_OFFSET_COMMAMD_LINK_CTRL_CHANNEL_IDX_REG);
 		device->us_link_desc[idx].ctrl_channel_index=ctrl_channel_idx;
-
+		
+		
 		/*3.try to initialize ctrl and data channels*/
 		device->us_link_desc[idx].ctrl=PTR_OFFSET_BY(struct ctrl_channel*,device->ctrl_channel_base,channel_base_offset(device->us_link_desc[idx].ctrl_channel_index));
-		printf("[x]link-id: %d  ctrl-channel-index:%d data-channels:%d mac:%02x:%02x:%02x:%02x:%02x:%02x\n",
+		printf("[rte_vlink]link-id: %d  ctrl-channel-index:%d data-channels:%d mac:%02x:%02x:%02x:%02x:%02x:%02x\n",
 			idx,
 			device->us_link_desc[idx].ctrl->index_in_vm_domain,
 			device->us_link_desc[idx].ctrl->nr_data_channels,
@@ -120,6 +175,7 @@ int scan_virtual_link(struct vlink_device * device)
 				(int)(device->us_link_desc[idx].ctrl->channel_records[iptr].offset_to_vm_shm_base+alloc_sub_channel_offset()),
 				(int)(device->us_link_desc[idx].ctrl->channel_records[iptr].offset_to_vm_shm_base+tx_sub_channel_offset()));
 		}
+		device->us_link_desc[idx].ctrl->qemu_driver_state=DRIVER_STATUS_INITIALIZED;/*it means that qemu lane is ready ,please start tranmiting*/
 	}
 	return 0;
 }

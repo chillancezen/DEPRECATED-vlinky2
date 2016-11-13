@@ -1,5 +1,6 @@
 #ifndef __DPDK_MAPPING_HASH
 #define __DPDK_MAPPING_HASH
+/*2016.11.07 this would be deprecated due to low efficiency*/
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

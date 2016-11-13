@@ -8,7 +8,7 @@ struct dpdk_buf{
                 unsigned char dummy0[128];
                 struct {
                         unsigned char dummy1[0];
-                        void * buf_addr;/*offset is 0*/
+                        void * buf_addr;
                 };
                 struct{
                         unsigned char dummy2[16];
@@ -20,6 +20,10 @@ struct dpdk_buf{
                         uint32_t pkt_len;
                         uint16_t data_len;
                 };
+				struct {
+						unsigned char dummy4[64];
+						uint64_t udata64;
+				};
         };
 }__attribute__((packed));
 
@@ -27,9 +31,13 @@ struct dpdk_buf{
 int main(int argc,char**argv)
 {
 	struct vlink_device device;
-	vlink_device_initialize(&device);
-	establish_translation_tbl(&device);
-	scan_virtual_link(&device);
+	int rc;
+	rc=vlink_device_initialize(&device);
+
+	rc=establish_translation_tbl(&device,NULL,NULL);
+
+	rc=scan_virtual_link(&device);
+
 	int link_num=(argc>1)?atoi(argv[1]):0;
 	int channel_num=(argc>2)?atoi(argv[2]):0;
 	printf("pmd test on link:%d channel:%d\n",link_num, channel_num);
@@ -46,9 +54,11 @@ int main(int argc,char**argv)
 	while(1){
 		nr_dequeued_rx=dequeue_bulk(device.us_link_desc[link_num].data[channel_num].rx_stub,qe_rx,TEST_BURST_SIZE);
 
+		if( 0)
 		for(idx=0;idx<nr_dequeued_rx;idx++){
-			buf=PTR(struct dpdk_buf*,translate_phy_address(device.p2v_hashtbl,qe_rx[idx].rte_pkt_offset));
-			pkt=PTR_OFFSET_BY(unsigned char*,translate_phy_address(device.p2v_hashtbl,qe_rx[idx].rte_data_offset),buf->data_off);
+		//	buf=PTR(struct dpdk_buf*,translate_phy_address(device.p2v_hashtbl,qe_rx[idx].rte_pkt_offset));
+	//		buf=PTR(struct dpdk_buf*,translate_phy_address(device.p2v_hashtbl,qe_rx[idx].rte_pkt_offset));
+	//		pkt=PTR_OFFSET_BY(unsigned char*,translate_phy_address(device.p2v_hashtbl,qe_rx[idx].rte_data_offset),0);
 			//printf("rx %02x:%02x:%02x:%02x:%02x:%02x %d\n",pkt[0+6-6],pkt[1+6-6],pkt[2+6-6],pkt[3+6-6],pkt[4+6-6],pkt[5+6-6],buf->data_len);
 #if 0 
 		for(ipt_idx=0;ipt_idx<14/*buf->pkt_len*/;ipt_idx++)

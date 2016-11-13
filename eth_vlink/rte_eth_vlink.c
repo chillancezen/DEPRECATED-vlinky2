@@ -149,10 +149,7 @@ static struct rte_eth_link pmd_link={
 	.link_status=ETH_LINK_DOWN,
 	.link_autoneg=ETH_LINK_SPEED_AUTONEG,
 };
-uint64_t last_tsc;
-uint64_t current_tsc;
-uint64_t calling_cnt;
-uint64_t cppu_hz;
+
 
 static void vlink_dev_stats_get(struct rte_eth_dev *dev,struct rte_eth_stats *stat)
 {
@@ -178,14 +175,7 @@ static void vlink_dev_stats_get(struct rte_eth_dev *dev,struct rte_eth_stats *st
 	stat->obytes=total_out_bytes;
 	stat->ierrors=total_in_errors;
 	stat->oerrors=total_out_errors;
-	if(calling_cnt){
-
-	//printf("mean calling time:%"PRIu64"(%"PRIu64"us) by %"PRIu64"\n",((current_tsc-last_tsc)/calling_cnt),((current_tsc-last_tsc)*1000000/calling_cnt)/cppu_hz,calling_cnt);
-		/*reset statistics*/
-		last_tsc=rte_get_tsc_cycles();
-		calling_cnt=0;
-
-	}
+	
 		
 }
 
@@ -204,9 +194,7 @@ static void vlink_dev_stats_reset(struct rte_eth_dev *dev)
 		private->rxtx_data_channels[idx].out_errors=0;
 	}
 	
-	last_tsc=rte_get_tsc_cycles();
-	current_tsc=rte_get_tsc_cycles();
-	calling_cnt=0;
+	
 }
 
 
@@ -247,17 +235,17 @@ static uint16_t __vlink_rx_internal(struct rte_eth_dev * dev,int data_channel_in
 		return 0;
 	channel=&private->rxtx_data_channels[data_channel_index];
 	
-	/*1.receive as much packets as possible from tx sub-channel*/
+	/*1.receive as many packets as possible from tx sub-channel*/
 	nr_dequeued=dequeue_bulk(channel->tx_stub,qele,ready_to_recv);
 	for(idx=0;idx<nr_dequeued;idx++){/*translation physical address back to virtual address*/
-		mbuf=PTR(struct rte_mbuf*,translate_phy_address(qele[idx].rte_pkt_offset));
+		mbuf=PTR(struct rte_mbuf*,rte_translation_phy2virt((void*)qele[idx].rte_pkt_offset));
 		RTE_ASSERT(mbuf);/*should crash here,cause in no cases,a bad physical address will never be enqueued.*/
 		bufs[idx]=mbuf;
 		channel->in_bytes+=mbuf->pkt_len;
 	}
 	
 	#if 0
-	/*2.receive as much as packets from free sub-channel*/
+	/*2.receive as many packets as possible from free sub-channel*/
 	nr_dequeued_free=dequeue_bulk(channel->free_stub,qele_free,VLINK_BURST_RXTX_SIZE);
 	if(nr_dequeued_free){
 		nr_enqueued_alloc=enqueue_bulk(channel->alloc_stub,qele_free,nr_dequeued_free);
@@ -298,6 +286,9 @@ static uint16_t vlink_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	struct vlink_data_channel * channel=PTR(struct vlink_data_channel*,q);
 	struct rte_eth_dev * dev=channel->dev;
 	struct vlink_pmd_private*private =dev->data->dev_private;
+	if(!private->ctrl->qemu_connected || private->ctrl->qemu_driver_state!=DRIVER_STATUS_INITIALIZED)/*qemu lance not ready*/
+		return 0;
+	
 	int idx;
 	switch(private->pmd_rx_mode)
 	{
@@ -339,19 +330,20 @@ static uint16_t __vlink_tx_internal(struct rte_eth_dev * dev,int data_channel_in
 	channel=&(private->rxtx_data_channels[data_channel_index]);
 	
 	for(idx=0;idx<ready_to_xmit;idx++){
-		qele[idx].rte_pkt_offset=translate_virt_address(PTR(uint64_t,bufs[idx]));
-		qele[idx].rte_data_offset=translate_virt_address(PTR(uint64_t,bufs[idx]->buf_addr));
+		qele[idx].rte_pkt_offset=(uint64_t)rte_translation_virt2phy(bufs[idx]);
+			/*translate_virt_address(PTR(uint64_t,bufs[idx]));*/
+		/*qele[idx].rte_data_offset=translate_virt_address(PTR(uint64_t,bufs[idx]->buf_addr));*/
+		qele[idx].rte_data_offset=rte_pktmbuf_mtod(bufs[idx],char *)-(char*)bufs[idx];
+		/*note . rte_data_offset stores offset to mbuf ptr,not a translated physical address*/
+		
 		channel->out_bytes+=bufs[idx]->pkt_len;
-		//rte_pktmbuf_free(bufs[idx]);
 	}
-	//nr_enqueued=ready_to_xmit;
 	nr_enqueued=enqueue_bulk(channel->rx_stub,qele,ready_to_xmit);
 	
 	for(idx=nr_enqueued;idx<ready_to_xmit;idx++)/*unsent packets needed to be removed from statistics*/
 		channel->out_bytes-=bufs[idx]->pkt_len;
 	
 	channel->out_packets+=nr_enqueued;
-	
 	return nr_enqueued;
 }
 
@@ -362,6 +354,8 @@ static uint16_t vlink_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	struct vlink_data_channel * channel=PTR(struct vlink_data_channel*,q);
 	struct rte_eth_dev * dev=channel->dev;
 	struct vlink_pmd_private *private =dev->data->dev_private;
+	if(!private->ctrl->qemu_connected || private->ctrl->qemu_driver_state!=DRIVER_STATUS_INITIALIZED)/*qemu lance not ready*/
+		return 0;
 	
 	int idx=0;
 	
@@ -391,8 +385,6 @@ static uint16_t vlink_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 
 			break;
 	}
-	current_tsc=rte_get_tsc_cycles();
-	calling_cnt++;
 	
 	return nr_xmited;
 }
@@ -400,8 +392,7 @@ static uint16_t vlink_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 
 static int rte_pmd_vlink_dev_init(const char*name,const char* params)
 {
-	cppu_hz=rte_get_tsc_hz();
-	printf("cpu hz:%"PRIu64"\n",cppu_hz);
+
 
 	char link_name[64];
 	int rxtx_mode=VLINK_PMD_MODE_BONDING;
@@ -455,8 +446,9 @@ static int rte_pmd_vlink_dev_init(const char*name,const char* params)
 		goto fails;
 	
 	/*2.map vm_domain shm*/
-	vm_shm_base=map_shared_memory(ce->vm_domain,ce->max_channels*CHANNEL_SIZE);
 	#if 0
+	vm_shm_base=map_shared_memory(ce->vm_domain,ce->max_channels*CHANNEL_SIZE);
+	#else
 	unsigned long nodemask=1;
 	vm_shm_base=map_shared_memory_from_sockets(ce->vm_domain,ce->max_channels*CHANNEL_SIZE,&nodemask);
 	#endif
@@ -483,6 +475,7 @@ static int rte_pmd_vlink_dev_init(const char*name,const char* params)
 	VLINK_LOG("[x]vlink tx mode:%s\n",private->pmd_tx_mode==VLINK_PMD_MODE_BONDING?"VLINK_PMD_MODE_BONDING":"VLINK_PMD_MODE_MULTI_Q");
 	VLINK_LOG("[x]ctrl channel index:%d(offset:%d)\n",(int)private->ctrl->index_in_vm_domain,(int)private->ctrl->offset_to_vm_shm_base);
 	{
+		private->ctrl->dpdk_driver_state=DRIVER_STATUS_INITIALIZING;
 		ASSERT(((int)private->ctrl->nr_data_channels==(ce->allocated_channels-1)));
 		int idx=0;
 		for(;idx<(int)private->ctrl->nr_data_channels;idx++){
@@ -527,8 +520,7 @@ static int rte_pmd_vlink_dev_init(const char*name,const char* params)
 	eth_dev->tx_pkt_burst=vlink_tx;
 	
 	
-	
-	
+	private->ctrl->dpdk_driver_state=DRIVER_STATUS_INITIALIZED;
 	kvlist_free:
 		if(kvlist)
 			rte_kvargs_free(kvlist);

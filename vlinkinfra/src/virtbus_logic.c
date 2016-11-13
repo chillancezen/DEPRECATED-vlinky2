@@ -410,7 +410,70 @@ void change_lane_connection_status(struct endpoint *point,int is_dpdk,int is_con
 	ctrl_channel_index=point->vlink->channels[0];
 	ctrl_channel_offset=channel_base_offset(ctrl_channel_index);
 	ctrl=PTR_OFFSET_BY(struct ctrl_channel*,vm_shm_base,ctrl_channel_offset);
+	#if 0
 	*(is_dpdk?&ctrl->dpdk_connected:&ctrl->qemu_connected)=is_connected?1:0;
+	#endif
+	if(is_dpdk)
+		ctrl->dpdk_connected=is_connected?CONNECT_STATUS_CONNECTED:CONNECT_STATUS_DISCONNECTED;
+	else 
+		ctrl->qemu_connected=is_connected?CONNECT_STATUS_CONNECTED:CONNECT_STATUS_DISCONNECTED;
+	
+}
+void change_lane_driver_status(struct endpoint * point,int is_dpdk,int status)
+{
+	void * vm_shm_base;
+	int ctrl_channel_index;
+	int ctrl_channel_offset;
+	struct ctrl_channel *ctrl;
+	if(!point->vlink||!point->vlink->domain)
+		return;
+	vm_shm_base=PTR(void*,point->vlink->domain->shm_base);
+	if(point->vlink->nr_channels_allocated<2)
+		return;
+	ctrl_channel_index=point->vlink->channels[0];
+	ctrl_channel_offset=channel_base_offset(ctrl_channel_index);
+	ctrl=PTR_OFFSET_BY(struct ctrl_channel*,vm_shm_base,ctrl_channel_offset);
+
+	
+	if(is_dpdk)
+		ctrl->dpdk_driver_state=status;
+	else 
+		ctrl->qemu_driver_state=status;
+}
+void change_vlink_version_number(struct endpoint * point,int number)
+{
+	void * vm_shm_base;
+	int ctrl_channel_index;
+	int ctrl_channel_offset;
+	struct ctrl_channel *ctrl;
+	if(!point->vlink||!point->vlink->domain)
+		return;
+	vm_shm_base=PTR(void*,point->vlink->domain->shm_base);
+	if(point->vlink->nr_channels_allocated<2)
+		return;
+	ctrl_channel_index=point->vlink->channels[0];
+	ctrl_channel_offset=channel_base_offset(ctrl_channel_index);
+	ctrl=PTR_OFFSET_BY(struct ctrl_channel*,vm_shm_base,ctrl_channel_offset);
+
+	ctrl->version_number=number;
+}
+void change_vlink_version_number_by_increment(struct endpoint* point)
+{
+	void * vm_shm_base;
+	int ctrl_channel_index;
+	int ctrl_channel_offset;
+	struct ctrl_channel *ctrl;
+	if(!point->vlink||!point->vlink->domain)
+		return;
+	vm_shm_base=PTR(void*,point->vlink->domain->shm_base);
+	if(point->vlink->nr_channels_allocated<2)
+		return;
+	ctrl_channel_index=point->vlink->channels[0];
+	ctrl_channel_offset=channel_base_offset(ctrl_channel_index);
+	ctrl=PTR_OFFSET_BY(struct ctrl_channel*,vm_shm_base,ctrl_channel_offset);
+
+	ctrl->version_number++;
+
 }
 void message_vlink_request_entry(struct tlv_header * tlv,void * value,void*arg)
 {
@@ -454,8 +517,16 @@ void message_vlink_request_entry(struct tlv_header * tlv,void * value,void*arg)
 							}
 						}
 						point->vlink->fd_dpdk=point->fd_client;
+						initialize_virtual_link_channels(point);
+						change_lane_connection_status(point,1,CONNECT_STATUS_CONNECTED);
+						change_lane_driver_status(point,1,DRIVER_STATUS_NOT_INITIALIZED);
+						change_vlink_version_number_by_increment(point);
+						#if 0
 						initialize_virtual_link_channels(point);/*whenever dpdk lane is connected ,initialize vlink channels*/
 						change_lane_connection_status(point,1,1);
+						change_lane_driver_status(point,1,DRIVER_STATUS_NOT_INITIALIZED);
+						#endif
+						
 						break;
 					case VLINK_ROLE_QEMU:
 						{
@@ -465,7 +536,13 @@ void message_vlink_request_entry(struct tlv_header * tlv,void * value,void*arg)
 							}
 						}
 						point->vlink->fd_qemu=point->fd_client;
+						change_lane_connection_status(point,0,CONNECT_STATUS_CONNECTED);
+						change_lane_driver_status(point,0,DRIVER_STATUS_NOT_INITIALIZED);
+						#if 0
 						change_lane_connection_status(point,0,1);
+						change_lane_driver_status(point,0,DRIVER_STATUS_NOT_INITIALIZED);
+						#endif
+						
 						break;
 					default:
 						/*ASSERT(({!"unknow vlink role found!";}));*/
@@ -599,8 +676,31 @@ void message_vlink_init_entry(struct tlv_header * tlv,void * value,void*arg)
 						}
 					}
 					point->vlink->fd_dpdk=point->fd_client;
+					if(init_flag){
+						initialize_virtual_link_channels(point);
+						change_lane_connection_status(point,1,CONNECT_STATUS_CONNECTED);/*dpdk lane is connected while qemu is disconnected*/
+						change_lane_connection_status(point,0,CONNECT_STATUS_DISCONNECTED);
+						change_lane_driver_status(point,1,DRIVER_STATUS_NOT_INITIALIZED);
+						change_lane_driver_status(point,0,DRIVER_STATUS_NOT_INITIALIZED);
+						change_vlink_version_number(point,INITIAL_VERSION_NUMBER);
+						
+					}else{
+						initialize_virtual_link_channels(point);
+						change_lane_connection_status(point,1,CONNECT_STATUS_CONNECTED);
+						change_lane_driver_status(point,1,DRIVER_STATUS_NOT_INITIALIZED);
+						change_vlink_version_number_by_increment(point);
+					}
+					
+					#if 0
+					if(init_flag){
+						change_lane_driver_status(point,1,DRIVER_STATUS_NOT_INITIALIZED);
+						change_lane_driver_status(point,0,DRIVER_STATUS_NOT_INITIALIZED);
+					}
 					initialize_virtual_link_channels(point);/*whenever dpdk lane is connected ,initialize vlink channels*/
 					change_lane_connection_status(point,1,1);
+					change_lane_driver_status(point,1,DRIVER_STATUS_NOT_INITIALIZED);
+					change_vlink_version_number(point,INITIAL_VERSION_NUMBER);/*only when this link is created by QEMU*/
+					#endif
 					break;
 				case VLINK_ROLE_QEMU:
 					{
@@ -610,9 +710,28 @@ void message_vlink_init_entry(struct tlv_header * tlv,void * value,void*arg)
 						}
 					}
 					point->vlink->fd_qemu=point->fd_client;
-					if(init_flag)
-						initialize_virtual_link_channels(point);/*initialize vlink channels,if it's the vlink is created for the first time*/
+					if(init_flag){
+						initialize_virtual_link_channels(point);
+						change_lane_connection_status(point,1,CONNECT_STATUS_DISCONNECTED);
+						change_lane_connection_status(point,0,CONNECT_STATUS_CONNECTED);
+						change_lane_driver_status(point,1,DRIVER_STATUS_NOT_INITIALIZED);
+						change_lane_driver_status(point,0,DRIVER_STATUS_NOT_INITIALIZED);
+						change_vlink_version_number(point,INITIAL_VERSION_NUMBER);
+					}else{
+						change_lane_connection_status(point,0,CONNECT_STATUS_CONNECTED);
+						change_lane_driver_status(point,0,DRIVER_STATUS_NOT_INITIALIZED);
+					}
+					#if 0
+					point->vlink->fd_qemu=point->fd_client;
+					if(init_flag){
+						initialize_virtual_link_channels(point);/*initialize vlink channels,if it's the vlink which is created for the first time*/
+						change_lane_driver_status(point,1,DRIVER_STATUS_NOT_INITIALIZED);
+						change_lane_driver_status(point,0,DRIVER_STATUS_NOT_INITIALIZED);
+					}
 					change_lane_connection_status(point,0,1);
+					change_lane_driver_status(point,0,DRIVER_STATUS_NOT_INITIALIZED);
+					change_vlink_version_number(point,INITIAL_VERSION_NUMBER);/*only when this link is created by QEMU*/
+					#endif
 					break;
 				default:
 					/*ASSERT(({!"unknow vlink role found!";}));*/
@@ -702,7 +821,9 @@ void endpoint_dealloc_callback(struct endpoint* point)
 	fd_peer=(point->vlink->fd_dpdk==point->fd_client)?point->vlink->fd_qemu:point->vlink->fd_dpdk;
 	/*2.notify other side,this half is going down*/
 	/*2.1 change connection in ctrl channel*/
-	change_lane_connection_status(point,point->fd_client==point->vlink->fd_dpdk,0);
+	change_lane_connection_status(point,point->fd_client==point->vlink->fd_dpdk,CONNECT_STATUS_DISCONNECTED);
+	/*2.2 change driver status to NOT_INIT*/
+	change_lane_driver_status(point,point->fd_client==point->vlink->fd_dpdk,DRIVER_STATUS_NOT_INITIALIZED);
 	/*3.detach fd from vlink*/
 	point->vlink->fd_dpdk=(point->vlink->fd_dpdk==point->fd_client)?0:point->vlink->fd_dpdk;
 	point->vlink->fd_qemu=(point->vlink->fd_qemu==point->fd_client)?0:point->vlink->fd_qemu;

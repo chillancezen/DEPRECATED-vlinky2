@@ -1,8 +1,6 @@
-
 #   BSD LICENSE
-#	Copyright(c) 2016 Linc@unitedstack 
+#
 #   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
-#   Copyright(c) 2014 6WIND S.A.
 #   All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or without
@@ -31,39 +29,22 @@
 #   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+ifeq ($(RTE_SDK),)
+$(error "Please define RTE_SDK environment variable")
+endif
+
+# Default target, can be overriden by command line or environment
+RTE_TARGET ?= x86_64-native-linuxapp-gcc
+
 include $(RTE_SDK)/mk/rte.vars.mk
 
-#
-# library name
-#
-LIB = librte_pmd_vlink.a
+# binary name
+APP = rte_vlink_test
 
-CFLAGS += -O3 -I$(VLINK_SDK)/vlinkinfra/include
-CFLAGS += $(WERROR_FLAGS)
-LDLIBS += -lvlinkinfra
-
-EXPORT_MAP := rte_pmd_vlink_version.map
-
-LIBABIVER := 1
-
-#
 # all source are stored in SRCS-y
-#
-SRCS-$(CONFIG_RTE_LIBRTE_PMD_VLINK) += rte_eth_vlink.c
+SRCS-y := main.c
 
-#
-# Export include files
-#
-SYMLINK-y-include +=
+CFLAGS += -O3
+CFLAGS += $(WERROR_FLAGS)
 
-# this lib depends upon:
-DEPDIRS-$(CONFIG_RTE_LIBRTE_PMD_VLINK) += lib/librte_eal
-DEPDIRS-$(CONFIG_RTE_LIBRTE_PMD_VLINK) += lib/librte_mbuf
-DEPDIRS-$(CONFIG_RTE_LIBRTE_PMD_VLINK) += lib/librte_mempool
-DEPDIRS-$(CONFIG_RTE_LIBRTE_PMD_VLINK) += lib/librte_ether
-DEPDIRS-$(CONFIG_RTE_LIBRTE_PMD_VLINK) += lib/librte_kvargs
-
-include $(RTE_SDK)/mk/rte.lib.mk
-
-cute:$(LIB)
-	yes |cp librte_pmd_vlink.a ../../../x86_64-native-linuxapp-gcc/lib/
+include $(RTE_SDK)/mk/rte.extapp.mk
